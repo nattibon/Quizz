@@ -3,7 +3,7 @@ import SignatureCanvas from 'react-signature-canvas';
 import { Button } from './Button';
 import { Eraser, Undo, RefreshCcw, Save, PenTool, Highlighter } from 'lucide-react';
 
-export default function DrawingCanvas({ initialDataUrl, onSave }) {
+export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = false, isDrawingMode = true }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
     const [isEmpty, setIsEmpty] = useState(true);
@@ -112,10 +112,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave }) {
         }
     };
 
+    if (overlayMode && !isDrawingMode) {
+        return null; // Hidden when not in drawing mode and acts as an overlay
+    }
+
     return (
-        <div className="flex flex-col gap-3 w-full">
+        <div className={`flex flex-col gap-3 w-full ${overlayMode ? 'absolute inset-0 z-50 pointer-events-none' : ''}`}>
             {/* Toolbar */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-1 border-b border-slate-100 pb-3">
+            <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-1 border-b border-slate-100 pb-3 ${overlayMode ? 'pointer-events-auto bg-white/90 backdrop-blur-sm p-3 rounded-b-xl shadow-sm border border-slate-200 mt-2 mx-4 sticky top-4' : ''}`}>
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Tool Picker */}
                     <div className="flex bg-slate-100 p-1 rounded-lg">
@@ -188,7 +192,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave }) {
                 </div>
             </div>
 
-            <div ref={containerRef} className="border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative w-full touch-none" style={{ height: '500px' }}>
+            <div ref={containerRef} className={`${overlayMode ? 'flex-1 pointer-events-auto' : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative w-full touch-none'} w-full`} style={overlayMode ? {} : { height: '500px' }}>
                 <SignatureCanvas
                     ref={canvasRef}
                     penColor={penColor}
@@ -203,9 +207,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave }) {
                 />
             </div>
 
-            <p className="text-xs text-slate-400 text-right pr-2 mt-1">
-                รองรับการใช้นิ้วมือ และ ปากกา Stylus สำหรับแท็บเล็ต ระบบจะเริ่มบันทึกอัตโนมัติเมื่อวาดเสร็จ
-            </p>
+            {!overlayMode && (
+                <p className="text-xs text-slate-400 text-right pr-2 mt-1">
+                    รองรับการใช้นิ้วมือ และ ปากกา Stylus สำหรับแท็บเล็ต ระบบจะเริ่มบันทึกอัตโนมัติเมื่อวาดเสร็จ
+                </p>
+            )}
         </div>
     );
 }

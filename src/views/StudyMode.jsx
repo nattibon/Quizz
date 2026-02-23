@@ -3,7 +3,7 @@ import { useQuiz } from '../context/QuizContext';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
-import { ArrowLeft, Play, LayoutList, Image as ImageIcon, Video, Trash2, Plus, Pen } from 'lucide-react';
+import { ArrowLeft, Play, LayoutList, Image as ImageIcon, Video, Trash2, Plus, Pen, BookOpen } from 'lucide-react';
 import DrawingCanvas from '../components/ui/DrawingCanvas';
 
 export default function StudyMode({ quizId, navigateTo }) {
@@ -12,6 +12,7 @@ export default function StudyMode({ quizId, navigateTo }) {
 
     const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
     const [slideNotes, setSlideNotes] = useState({}); // Stores drawn data URLs per slide index
+    const [isDrawingMode, setIsDrawingMode] = useState(false);
 
     if (!quiz) {
         return (
@@ -72,16 +73,34 @@ export default function StudyMode({ quizId, navigateTo }) {
 
             <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide">หน้า {currentSlideIndex + 1} จาก {materials.length}</span>
+                    <span className="text-sm font-semibold text-slate-500 uppercase tracking-wide hidden sm:inline-block">หน้า {currentSlideIndex + 1} จาก {materials.length}</span>
                 </div>
+
+                {/* Mode Toggle */}
+                <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                    <button
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-md font-medium text-sm transition-colors ${!isDrawingMode ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        onClick={() => setIsDrawingMode(false)}
+                    >
+                        <BookOpen className="w-4 h-4" /> โหมดอ่าน
+                    </button>
+                    <button
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-md font-medium text-sm transition-colors ${isDrawingMode ? 'bg-white text-primary-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        onClick={() => setIsDrawingMode(true)}
+                    >
+                        <Pen className="w-4 h-4" /> โหมดขีดเขียน
+                    </button>
+                </div>
+
                 <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handlePrev} disabled={isFirstSlide}>ก่อนหน้า</Button>
                     <Button variant="outline" size="sm" onClick={handleNext} disabled={isLastSlide}>ถัดไป</Button>
                 </div>
             </div>
 
-            <Card className="min-h-[500px] flex flex-col justify-center items-center p-8 shadow-md border-slate-200 bg-white">
-                <div className="w-full max-w-4xl flex flex-col gap-6">
+            <Card className="min-h-[500px] flex flex-col justify-start items-center relative shadow-md border-slate-200 bg-white overflow-hidden">
+                {/* Content Container */}
+                <div className={`w-full max-w-4xl flex flex-col gap-6 p-8 ${isDrawingMode ? 'pointer-events-none select-none' : ''}`}>
                     {/* Title */}
                     {currentMaterial.title && (
                         <h3 className="text-2xl font-bold text-slate-900 mb-2 border-b pb-4 text-center">
@@ -125,22 +144,18 @@ export default function StudyMode({ quizId, navigateTo }) {
                         </div>
                     )}
 
-                    {/* Scratchpad */}
-                    <div className="w-full mt-12 border-t border-slate-200 pt-8">
-                        <div className="flex flex-col gap-2 mb-4">
-                            <h4 className="font-bold text-slate-800 flex items-center gap-2">
-                                <Pen className="w-5 h-5 text-primary-600" /> กระดานทด / จดบันทึก
-                            </h4>
-                            <p className="text-sm text-slate-500">
-                                ใช้กระดานด้านล่างนี้เพื่อทดเลข ขีดเขียน หรือจดโน้ตย่อขณะอ่านเนื้อหา (ระบบจะจำรอยขีดเขียนไว้ให้ในแต่ละหน้า)
-                            </p>
-                        </div>
-                        <DrawingCanvas
-                            key={`study-canvas-${currentSlideIndex}`}
-                            initialDataUrl={slideNotes[currentSlideIndex] || ''}
-                            onSave={handleDrawingChange}
-                        />
-                    </div>
+                    {/* We no longer show the scratchpad here. It is an overlay below. */}
+                </div>
+
+                {/* Drawing Overlay */}
+                <div className={`absolute inset-0 z-40 pointer-events-none ${isDrawingMode ? 'pointer-events-auto' : ''}`}>
+                    <DrawingCanvas
+                        key={`study-canvas-${currentSlideIndex}`}
+                        initialDataUrl={slideNotes[currentSlideIndex] || ''}
+                        onSave={handleDrawingChange}
+                        overlayMode={true}
+                        isDrawingMode={isDrawingMode}
+                    />
                 </div>
             </Card>
 
