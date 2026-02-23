@@ -158,61 +158,52 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         startHoldTimer();
     };
 
-    // Use a global pointer move listener while drawing to bypass touch-action issues
+    // Use pointer events directly on the canvas to bypass touch-action issues and account for stylus jitter
     useEffect(() => {
-        const handleGlobalPointerMove = (e) => {
+        const canvas = canvasRef.current?.getCanvas();
+        if (!canvas) return;
+
+        // This keeps track of the coordinates to see if the user is holding still
+        let localLastPoint = null;
+
+        const handlePointerMove = (e) => {
             if (!isDrawingRef.current) return;
             if (isLineSnappedRef.current) return;
 
-            if (canvasRef.current && canvasRef.current._signaturePad) {
-                const pad = canvasRef.current._signaturePad;
+            // Extract coordinates
+            let clientX, clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else if (e.clientX !== undefined) {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            } else {
+                return;
+            }
 
-                // try to extract coordinates from standard mouse/touch events
-                let clientX, clientY;
-                if (e.touches && e.touches.length > 0) {
-                    clientX = e.touches[0].clientX;
-                    clientY = e.touches[0].clientY;
-                } else {
-                    clientX = e.clientX;
-                    clientY = e.clientY;
+            if (localLastPoint) {
+                const dx = clientX - localLastPoint.x;
+                const dy = clientY - localLastPoint.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // High-DPI screens and stylus pens jitter constantly.
+                // A threshold of 15px prevents micro-movements from resetting the hold timer
+                if (dist > 15) {
+                    startHoldTimer();
+                    localLastPoint = { x: clientX, y: clientY };
                 }
-
-                if (clientX === undefined || clientY === undefined) return;
-
-                // Create a basic point 
-                const rect = canvasRef.current.getCanvas().getBoundingClientRect();
-                const currentPoint = {
-                    x: clientX - rect.left,
-                    y: clientY - rect.top,
-                    time: Date.now()
-                };
-
-                if (lastPointRef.current) {
-                    const dx = currentPoint.x - lastPointRef.current.x;
-                    const dy = currentPoint.y - lastPointRef.current.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-
-                    // If moving significantly, reset the hold timer
-                    if (dist > 5) {
-                        // console.log("Pointer moving... resetting timer. Dist:", dist);
-                        startHoldTimer();
-                        lastPointRef.current = currentPoint;
-                    }
-                } else {
-                    lastPointRef.current = currentPoint;
-                    if (!strokeStartRef.current) {
-                        strokeStartRef.current = currentPoint;
-                    }
-                }
+            } else {
+                localLastPoint = { x: clientX, y: clientY };
             }
         };
 
-        window.addEventListener('pointermove', handleGlobalPointerMove, { passive: false });
-        window.addEventListener('touchmove', handleGlobalPointerMove, { passive: false });
+        canvas.addEventListener('pointermove', handlePointerMove, { passive: true });
+        canvas.addEventListener('touchmove', handlePointerMove, { passive: true });
 
         return () => {
-            window.removeEventListener('pointermove', handleGlobalPointerMove);
-            window.removeEventListener('touchmove', handleGlobalPointerMove);
+            canvas.removeEventListener('pointermove', handlePointerMove);
+            canvas.removeEventListener('touchmove', handlePointerMove);
         };
     }, []);
 
@@ -226,47 +217,27 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     };
 
     const snapToStraightLine = () => {
-        console.log("Snapping check fired!");
-        if (!isDrawingRef.current) {
-            console.log("Snap aborted: isDrawing=false");
-            return;
-        }
-        if (isLineSnappedRef.current) {
-            console.log("Snap aborted: isLineSnapped=true");
-            return;
-        }
+        if (!isDrawingRef.current) return;
+        if (isLineSnappedRef.current) return;
 
         if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-        if (!strokeStartRef.current || !lastPointRef.current) {
-            console.log("Snap aborted: missing start or last point");
-            return;
-        }
 
         const pad = canvasRef.current._signaturePad;
-        const canvas = canvasRef.current.getCanvas();
-        const ctx = canvas.getContext("2d");
 
-        // Grab the internal data array completely
         const rawData = pad.toData();
-
         if (rawData && rawData.length > 0) {
-            // Get the current stroke being drawn (the last one in the array)
             const currentStroke = rawData[rawData.length - 1];
 
-            // Need at least start and end points
             if (currentStroke && currentStroke.points && currentStroke.points.length > 2) {
-                // Ensure we use the exact start and end from the stroke data itself
                 const start = currentStroke.points[0];
                 const end = currentStroke.points[currentStroke.points.length - 1];
 
                 const dx = end.x - start.x;
                 const dy = end.y - start.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
-                console.log("Snap distance calculated:", distance);
 
-                // Only snap if distance is significant enough
-                if (distance > 20) {
-                    console.log("Snapping to perfect line!");
+                // Need at least a visible line to snap (30 units)
+                if (distance > 30) {
                     isLineSnappedRef.current = true;
 
                     // 1. Force pad to end the current stroke
@@ -303,11 +274,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
                     // Trigger save
                     handleEndStroke();
-                } else {
-                    console.log("Line too short to snap");
                 }
-            } else {
-                console.log("Not enough points to snap");
             }
         }
     };
