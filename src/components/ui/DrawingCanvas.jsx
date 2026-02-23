@@ -31,7 +31,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             '#16a34a': '22, 163, 74'
         };
         const rgb = rgbMap[currentColor] || '15, 23, 42';
-        penColor = `rgba(${rgb}, 0.25)`; // 25% opacity for highlighter
+        penColor = `rgba(${rgb}, 0.15)`; // 15% opacity for highlighter so it doesn't obscure text
         minWidth = 14;
         maxWidth = 20;
         velocityFilterWeight = 0; // Less smoothing to feel more like a marker
