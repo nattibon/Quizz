@@ -5,13 +5,47 @@ import { Eraser, Undo, RefreshCcw, Save } from 'lucide-react';
 
 export default function DrawingCanvas({ initialDataUrl, onSave }) {
     const canvasRef = useRef(null);
+    const containerRef = useRef(null);
     const [isEmpty, setIsEmpty] = useState(true);
+
+    // Initial Resize and Window Resize listener
+    useEffect(() => {
+        const resizeCanvas = () => {
+            if (canvasRef.current && containerRef.current) {
+                const canvas = canvasRef.current.getCanvas();
+                const ratio = Math.max(window.devicePixelRatio || 1, 1);
+
+                // Save current drawing
+                const data = canvasRef.current.toData();
+
+                // Update internal resolution to match display size exactly
+                canvas.width = containerRef.current.offsetWidth * ratio;
+                canvas.height = containerRef.current.offsetHeight * ratio;
+                canvas.getContext("2d").scale(ratio, ratio);
+
+                canvasRef.current.clear();
+                // Restore drawing
+                if (data && data.length > 0) {
+                    canvasRef.current.fromData(data);
+                }
+            }
+        };
+
+        // Delay slighty to ensure container has rendered its width
+        setTimeout(resizeCanvas, 100);
+        window.addEventListener("resize", resizeCanvas);
+
+        return () => window.removeEventListener("resize", resizeCanvas);
+    }, []);
 
     // Load initial data if provided
     useEffect(() => {
         if (initialDataUrl && canvasRef.current) {
-            canvasRef.current.fromDataURL(initialDataUrl);
-            setIsEmpty(false);
+            // Need a slight delay to ensure canvas is properly sized before loading data
+            setTimeout(() => {
+                canvasRef.current.fromDataURL(initialDataUrl);
+                setIsEmpty(false);
+            }, 150);
         }
     }, [initialDataUrl]);
 
@@ -73,7 +107,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave }) {
                 </div>
             </div>
 
-            <div className="border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative" style={{ height: '400px' }}>
+            <div ref={containerRef} className="border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative w-full touch-none" style={{ height: '400px' }}>
                 <SignatureCanvas
                     ref={canvasRef}
                     penColor="black"
