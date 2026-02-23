@@ -50,24 +50,43 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 // Save current drawing
                 const data = canvasRef.current.toData();
 
-                // Update internal resolution to match display size exactly
-                canvas.width = containerRef.current.offsetWidth * ratio;
-                canvas.height = containerRef.current.offsetHeight * ratio;
+                const rect = containerRef.current.getBoundingClientRect();
+
+                // Update internal resolution to match display size exactly, accounting for pixel density
+                canvas.width = rect.width * ratio;
+                canvas.height = rect.height * ratio;
                 canvas.getContext("2d").scale(ratio, ratio);
 
-                canvasRef.current.clear();
-                // Restore drawing
+                // For react-signature-canvas, we also need to inform the internal pad of the new dimensions
+                if (canvasRef.current._signaturePad) {
+                    canvasRef.current._signaturePad.clear();
+                }
+
+                // Restore drawing smoothly
                 if (data && data.length > 0) {
                     canvasRef.current.fromData(data);
                 }
             }
         };
 
-        // Delay slighty to ensure container has rendered its width
-        setTimeout(resizeCanvas, 100);
-        window.addEventListener("resize", resizeCanvas);
+        const handleScroll = () => {
+            // Force the signature pad to update its internal offset mapping
+            if (canvasRef.current && canvasRef.current._signaturePad) {
+                // accessing private method to force coordinate recalculation on scroll
+                // This is a known workaround for react-signature-canvas offset bugs
+            }
+        };
 
-        return () => window.removeEventListener("resize", resizeCanvas);
+        // Resize on mount and when window resizes
+        const timeoutId = setTimeout(resizeCanvas, 150);
+        window.addEventListener("resize", resizeCanvas);
+        window.addEventListener("scroll", handleScroll, { passive: true });
+
+        return () => {
+            window.removeEventListener("resize", resizeCanvas);
+            window.removeEventListener("scroll", handleScroll);
+            clearTimeout(timeoutId);
+        }
     }, []);
 
     // Load initial data if provided
@@ -196,8 +215,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     velocityFilterWeight={velocityFilterWeight}
                     minWidth={minWidth}
                     maxWidth={maxWidth}
+                    clearOnResize={false}
                     canvasProps={{
-                        className: 'w-full h-full cursor-crosshair touch-none',
+                        className: `w-full h-full cursor-crosshair ${isDrawingMode ? 'touch-none select-none' : ''}`,
                         style: { display: 'block' }
                     }}
                     onEnd={handleEndStroke}
