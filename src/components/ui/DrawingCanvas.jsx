@@ -24,17 +24,16 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     let velocityFilterWeight = 0.7;
 
     if (activeTool === 'highlighter') {
-        const rgbMap = {
-            '#0f172a': '15, 23, 42',
-            '#2563eb': '37, 99, 235',
-            '#dc2626': '220, 38, 38',
-            '#16a34a': '22, 163, 74'
+        const solidMap = {
+            '#0f172a': '#fde047', // Yellow for default (black)
+            '#2563eb': '#93c5fd', // Light Blue
+            '#dc2626': '#fca5a5', // Light Red
+            '#16a34a': '#86efac'  // Light Green
         };
-        const rgb = rgbMap[currentColor] || '15, 23, 42';
-        penColor = `rgba(${rgb}, 0.15)`; // 15% opacity for highlighter so it doesn't obscure text
+        penColor = solidMap[currentColor] || '#fde047';
         minWidth = 14;
         maxWidth = 20;
-        velocityFilterWeight = 0; // Less smoothing to feel more like a marker
+        velocityFilterWeight = 0.5; // Moderate smoothing
     } else if (activeTool === 'eraser') {
         penColor = '#ffffff'; // Draw over with white background
         minWidth = 16;
@@ -201,7 +200,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     maxWidth={maxWidth}
                     canvasProps={{
                         className: 'w-full h-full cursor-crosshair touch-none',
-                        style: { display: 'block' }
+                        style: { display: 'block', mixBlendMode: 'multiply' }
                     }}
                     onEnd={handleEndStroke}
                 />
