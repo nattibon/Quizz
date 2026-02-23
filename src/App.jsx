@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { QuizProvider } from './context/QuizContext';
+import { QuizProvider, useQuiz } from './context/QuizContext';
 import { BookOpen } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import QuizEditor from './views/QuizEditor';
