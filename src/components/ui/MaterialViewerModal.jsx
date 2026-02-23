@@ -29,49 +29,41 @@ export default function MaterialViewerModal({ material, isOpen, onClose }) {
                 {/* Content Body */}
                 <div className="flex-1 overflow-y-auto p-6 bg-slate-100 flex justify-center items-start">
                     <div className="bg-white w-full rounded-xl shadow-sm border border-slate-200 p-8 min-h-full">
-                        {material.type === 'text' && (
-                            <div className="w-full flex flex-col gap-6">
-                                {material.imageUrl && (
-                                    <div className="flex justify-center w-full mb-4">
-                                        <img
-                                            src={material.imageUrl}
-                                            alt={material.title || 'Attached Image'}
-                                            className="max-h-[50vh] max-w-full object-contain rounded-lg shadow-sm border border-slate-200 bg-white"
-                                        />
-                                    </div>
-                                )}
-                                {material.content && (
-                                    <div className="text-lg text-slate-800 whitespace-pre-wrap leading-relaxed">
-                                        {material.content}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                        <div className="w-full flex flex-col gap-6">
+                            {/* Image (supporting both new imageUrl and old 'image' type content) */}
+                            {(material.imageUrl || (material.type === 'image' && material.content)) && (
+                                <div className="flex justify-center w-full mb-4">
+                                    <img
+                                        src={material.imageUrl || material.content}
+                                        alt={material.title || 'Attached Image'}
+                                        className="max-h-[50vh] max-w-full object-contain rounded-lg shadow-sm border border-slate-200 bg-white"
+                                        onError={(e) => {
+                                            e.target.onerror = null;
+                                            e.target.src = 'https://placehold.co/600x400/f1f5f9/94a3b8?text=Image+Not+Found';
+                                        }}
+                                    />
+                                </div>
+                            )}
 
-                        {material.type === 'image' && (
-                            <div className="flex justify-center w-full">
-                                <img
-                                    src={material.content}
-                                    alt={material.title || 'Attached Image'}
-                                    className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-sm border border-slate-200"
-                                    onError={(e) => {
-                                        e.target.onerror = null;
-                                        e.target.src = 'https://placehold.co/600x400/f1f5f9/94a3b8?text=Image+Not+Found';
-                                    }}
-                                />
-                            </div>
-                        )}
+                            {/* Text Content */}
+                            {(material.content && material.type !== 'embed' && material.type !== 'image') && (
+                                <div className="text-lg text-slate-800 whitespace-pre-wrap leading-relaxed">
+                                    {material.content}
+                                </div>
+                            )}
 
-                        {material.type === 'embed' && (
-                            <div className="w-full aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-inner max-w-4xl mx-auto">
-                                <iframe
-                                    src={material.content}
-                                    className="w-full h-full border-0"
-                                    allowFullScreen
-                                    title={material.title || "Embed"}
-                                ></iframe>
-                            </div>
-                        )}
+                            {/* Embed Video/Slide (supporting both new embedUrl and old 'embed' type content) */}
+                            {(material.embedUrl || (material.type === 'embed' && material.content)) && (
+                                <div className="w-full aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-inner max-w-4xl mx-auto mt-4">
+                                    <iframe
+                                        src={material.embedUrl || material.content}
+                                        className="w-full h-full border-0"
+                                        allowFullScreen
+                                        title={material.title || "Embed"}
+                                    ></iframe>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 

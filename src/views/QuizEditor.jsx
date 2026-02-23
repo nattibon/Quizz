@@ -218,13 +218,9 @@ export default function QuizEditor({ quizId, navigateTo }) {
                             <LayoutList className="w-5 h-5" /> เนื้อหาสำหรับการติว (สไลด์ที่จะแสดงก่อนทำข้อสอบ)
                         </h3>
                         <div className="flex gap-2">
-                            <Button size="sm" variant="outline" onClick={() => handleAddMaterial('text')} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+                            <Button size="sm" variant="outline" onClick={() => handleAddMaterial('slide')} className="border-amber-300 text-amber-700 hover:bg-amber-50">
                                 <LayoutList className="w-4 h-4 mr-2" />
-                                เพิ่มสไลด์ (ข้อความ + รูปภาพ)
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => handleAddMaterial('embed')} className="border-amber-300 text-amber-700 hover:bg-amber-50">
-                                <Video className="w-4 h-4 mr-2" />
-                                เพิ่ม Embed (เนื้อหาวิดีโอ/สไลด์)
+                                เพิ่มสไลด์ (ข้อความ + รูปภาพ + วิดีโอ/สไลด์ Embed)
                             </Button>
                         </div>
                     </div>
@@ -259,10 +255,8 @@ function MaterialEditorCard({ index, material, quizId, updateMaterial, deleteMat
         updateMaterial(quizId, material.id, { [field]: value });
     };
 
-    let icon = <LayoutList className="w-5 h-5 text-amber-600" />;
-    let typeLabel = "เนื้อหาสไลด์ (ข้อความและรูปภาพ)";
-    if (material.type === 'image') { icon = <ImageIcon className="w-5 h-5 text-amber-600" />; typeLabel = "เนื้อหารูปภาพ (เวอร์ชั่นเก่า)"; }
-    else if (material.type === 'embed') { icon = <Video className="w-5 h-5 text-amber-600" />; typeLabel = "วิดีโอ / สไลด์ (Embed URL)"; }
+    const icon = <LayoutList className="w-5 h-5 text-amber-600" />;
+    const typeLabel = "เนื้อหาสไลด์";
 
     return (
         <Card className="border-amber-200 shadow-sm">
@@ -291,122 +285,70 @@ function MaterialEditorCard({ index, material, quizId, updateMaterial, deleteMat
                     onChange={(e) => handleChange('title', e.target.value)}
                 />
 
-                {material.type === 'text' && (
-                    <div className="space-y-6">
-                        <Textarea
-                            label="รายละเอียดเนื้อหา"
-                            placeholder="พิมพ์เนื้อหาที่ต้องการให้นักเรียนอ่านที่นี่..."
-                            value={material.content || ''}
-                            onChange={(e) => handleChange('content', e.target.value)}
-                            rows={4}
-                        />
+                <div className="space-y-6">
+                    <Textarea
+                        label="รายละเอียดเนื้อหา"
+                        placeholder="พิมพ์เนื้อหาที่ต้องการให้นักเรียนอ่านที่นี่..."
+                        value={material.content || ''}
+                        onChange={(e) => handleChange('content', e.target.value)}
+                        rows={4}
+                    />
 
-                        {/* Image upload section for text materials */}
-                        <div className="pt-4 border-t border-amber-100">
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">รูปภาพประกอบสไลด์ (ไม่บังคับ)</label>
-                            <div className="flex items-center gap-3">
-                                <label className="flex items-center justify-center px-4 py-2 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500">
-                                    <Upload className="w-4 h-4 mr-2 text-slate-500" /> แนบรูปภาพ
-                                    <input
-                                        type="file"
-                                        accept="image/png, image/jpeg, image/webp"
-                                        className="sr-only"
-                                        onChange={async (e) => {
-                                            const file = e.target.files[0];
-                                            if (file) {
-                                                try {
-                                                    const base64ImageUrl = await compressImage(file);
-                                                    handleChange('imageUrl', base64ImageUrl);
-                                                } catch (error) {
-                                                    alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
-                                                }
+                    {/* Image upload section for all slides */}
+                    <div className="pt-4 border-t border-amber-100">
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">รูปภาพประกอบสไลด์ (ไม่บังคับ)</label>
+                        <div className="flex items-center gap-3">
+                            <label className="flex items-center justify-center px-4 py-2 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500">
+                                <Upload className="w-4 h-4 mr-2 text-slate-500" /> แนบรูปภาพ
+                                <input
+                                    type="file"
+                                    accept="image/png, image/jpeg, image/webp"
+                                    className="sr-only"
+                                    onChange={async (e) => {
+                                        const file = e.target.files[0];
+                                        if (file) {
+                                            try {
+                                                const base64ImageUrl = await compressImage(file);
+                                                handleChange('imageUrl', base64ImageUrl);
+                                            } catch (error) {
+                                                alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
                                             }
-                                        }}
-                                    />
-                                </label>
-                                {material.imageUrl && (
-                                    <Button variant="ghost" size="sm" onClick={() => handleChange('imageUrl', '')} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                                        ลบรูป
-                                    </Button>
-                                )}
-                            </div>
+                                        }
+                                    }}
+                                />
+                            </label>
                             {material.imageUrl && (
-                                <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-2 max-w-lg">
-                                    <img src={material.imageUrl} alt="Preview" className="w-full h-auto rounded object-contain max-h-64" />
-                                </div>
+                                <Button variant="ghost" size="sm" onClick={() => handleChange('imageUrl', '')} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                                    ลบรูป
+                                </Button>
                             )}
                         </div>
-                    </div>
-                )}
-
-                {material.type === 'image' && (
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1">รูปภาพประกอบสไลด์</label>
-                            <div className="flex items-center gap-3">
-                                <label className="flex items-center justify-center px-4 py-2 bg-white border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500">
-                                    <Upload className="w-4 h-4 mr-2 text-slate-500" /> อัพโหลดรูปภาพ
-                                    <input
-                                        type="file"
-                                        accept="image/png, image/jpeg, image/webp"
-                                        className="sr-only"
-                                        onChange={async (e) => {
-                                            const file = e.target.files[0];
-                                            if (file) {
-                                                try {
-                                                    const base64ImageUrl = await compressImage(file);
-                                                    handleChange('content', base64ImageUrl);
-                                                } catch (error) {
-                                                    alert("เกิดข้อผิดพลาดในการประมวลผลรูปภาพ");
-                                                }
-                                            }
-                                        }}
-                                    />
-                                </label>
-                                {material.content && (
-                                    <Button variant="ghost" size="sm" onClick={() => handleChange('content', '')} className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                                        ลบรูปภาพ
-                                    </Button>
-                                )}
-                            </div>
-                        </div>
-
-                        {!material.content && (
-                            <p className="text-sm text-slate-500">ยังไม่ได้อัพโหลดรูปภาพ (รองรับ .jpg, .png)</p>
-                        )}
-
-                        {material.content && (
-                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 max-w-lg">
-                                <img
-                                    src={material.content}
-                                    alt="Preview"
-                                    className="w-full h-auto rounded object-contain max-h-64"
-                                />
+                        {material.imageUrl && (
+                            <div className="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-2 max-w-lg">
+                                <img src={material.imageUrl} alt="Preview" className="w-full h-auto rounded object-contain max-h-64" />
                             </div>
                         )}
                     </div>
-                )}
 
-                {material.type === 'embed' && (
-                    <div className="space-y-4">
+                    <div className="pt-4 border-t border-amber-100 space-y-4">
                         <Input
                             label="Embed URL (เช่น ลิงก์จาก YouTube หรือ Google Slides)"
                             placeholder="ตัวอย่าง: https://www.youtube.com/embed/dQw4w9WgXcQ"
-                            value={material.content || ''}
-                            onChange={(e) => handleChange('content', e.target.value)}
+                            value={material.embedUrl || ''}
+                            onChange={(e) => handleChange('embedUrl', e.target.value)}
                         />
-                        {material.content && (
-                            <div className="aspect-video bg-slate-900 rounded-lg overflow-hidden max-w-2xl">
+                        {material.embedUrl && (
+                            <div className="aspect-video bg-slate-900 rounded-lg overflow-hidden max-w-2xl mt-4">
                                 <iframe
-                                    src={material.content}
+                                    src={material.embedUrl}
                                     className="w-full h-full border-0"
                                     allowFullScreen
                                 ></iframe>
                             </div>
                         )}
-                        <p className="text-xs text-slate-500 font-medium">* ต้องเป็น URL แบบ Embed ที่อนุญาตให้ใส่ใน iframe ได้เท่านั้น</p>
+                        <p className="text-xs text-slate-500 font-medium">* ต้องเป็น URL แบบ Embed ที่อนุญาตให้ใส่ใน iframe ได้เท่านั้น (เช่น YouTube Embed หรือ Google Slides Publish to Web)</p>
                     </div>
-                )}
+                </div>
             </CardContent>
         </Card>
     );

@@ -72,59 +72,50 @@ export default function StudyMode({ quizId, navigateTo }) {
             </div>
 
             <Card className="min-h-[500px] flex flex-col justify-center items-center p-8 shadow-md border-slate-200 bg-white">
-                {currentMaterial.type === 'text' && (
-                    <div className="w-full max-w-3xl flex flex-col gap-6">
-                        {currentMaterial.title && <h3 className="text-2xl font-bold text-slate-900 mb-2 border-b pb-4">{currentMaterial.title}</h3>}
+                <div className="w-full max-w-4xl flex flex-col gap-6">
+                    {/* Title */}
+                    {currentMaterial.title && (
+                        <h3 className="text-2xl font-bold text-slate-900 mb-2 border-b pb-4 text-center">
+                            {currentMaterial.title}
+                        </h3>
+                    )}
 
-                        {currentMaterial.imageUrl && (
-                            <div className="w-full bg-slate-50 rounded-xl border border-slate-200 p-2 flex items-center justify-center">
-                                <img
-                                    src={currentMaterial.imageUrl}
-                                    alt={currentMaterial.title || "Study Material"}
-                                    className="max-h-[400px] max-w-full object-contain rounded-lg shadow-sm"
-                                />
-                            </div>
-                        )}
-
-                        {currentMaterial.content && (
-                            <div className="text-lg text-slate-800 whitespace-pre-wrap leading-relaxed">
-                                {currentMaterial.content}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {currentMaterial.type === 'image' && (
-                    <div className="w-full max-w-3xl flex flex-col items-center gap-4">
-                        {currentMaterial.title && <h3 className="text-xl font-bold text-slate-900 w-full text-center">{currentMaterial.title}</h3>}
-                        <div className="w-full bg-slate-50 rounded-xl border border-slate-200 p-2 flex items-center justify-center min-h-[400px]">
+                    {/* Image (supporting both new imageUrl and old 'image' type content) */}
+                    {(currentMaterial.imageUrl || (currentMaterial.type === 'image' && currentMaterial.content)) && (
+                        <div className="w-full bg-slate-50 rounded-xl border border-slate-200 p-2 flex items-center justify-center">
                             <img
-                                src={currentMaterial.content}
+                                src={currentMaterial.imageUrl || currentMaterial.content}
                                 alt={currentMaterial.title || "Study Material"}
-                                className="max-h-[600px] max-w-full object-contain rounded-lg"
+                                className="max-h-[500px] max-w-full object-contain rounded-lg shadow-sm"
                                 onError={(e) => {
                                     e.target.onerror = null;
                                     e.target.src = 'https://placehold.co/600x400/f1f5f9/94a3b8?text=Image+Not+Found';
                                 }}
                             />
                         </div>
-                    </div>
-                )}
+                    )}
 
-                {currentMaterial.type === 'embed' && (
-                    <div className="w-full max-w-4xl flex flex-col items-center gap-4">
-                        {currentMaterial.title && <h3 className="text-xl font-bold text-slate-900 w-full text-left">{currentMaterial.title}</h3>}
-                        <div className="w-full aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-inner">
-                            <iframe
-                                src={currentMaterial.content}
-                                className="w-full h-full border-0"
-                                allowFullScreen
-                                title={currentMaterial.title || "Embed"}
-                            ></iframe>
+                    {/* Text Content */}
+                    {(currentMaterial.content && currentMaterial.type !== 'embed' && currentMaterial.type !== 'image') && (
+                        <div className="text-lg text-slate-800 whitespace-pre-wrap leading-relaxed">
+                            {currentMaterial.content}
                         </div>
-                        <p className="text-sm text-slate-500 self-start">Hint: You can embed YouTube videos or Google Slides by pasting their embed URL.</p>
-                    </div>
-                )}
+                    )}
+
+                    {/* Embed Video/Slide (supporting both new embedUrl and old 'embed' type content) */}
+                    {(currentMaterial.embedUrl || (currentMaterial.type === 'embed' && currentMaterial.content)) && (
+                        <div className="w-full flex justify-center mt-4">
+                            <div className="w-full max-w-3xl aspect-video bg-slate-900 rounded-xl overflow-hidden shadow-inner">
+                                <iframe
+                                    src={currentMaterial.embedUrl || currentMaterial.content}
+                                    className="w-full h-full border-0"
+                                    allowFullScreen
+                                    title={currentMaterial.title || "Embed"}
+                                ></iframe>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </Card>
 
             <div className="flex justify-end pt-4">
