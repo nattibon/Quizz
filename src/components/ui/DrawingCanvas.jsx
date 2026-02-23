@@ -10,6 +10,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const [activeTool, setActiveTool] = useState('pen'); // 'pen', 'highlighter', 'eraser'
     const [currentColor, setCurrentColor] = useState('#0f172a'); // default slate-900
 
+    // Hold-to-snap to straight line states
+    const holdTimerRef = useRef(null);
+    const strokeStartRef = useRef(null);
+    const lastPointRef = useRef(null);
+    const isDrawingRef = useRef(false);
+    const isLineSnappedRef = useRef(false);
+    const [lineSnapEnabled, setLineSnapEnabled] = useState(true);
+
     const colors = [
         { name: 'ดำ (Black)', value: '#0f172a', bgClass: 'bg-slate-900' },
         { name: 'น้ำเงิน (Blue)', value: '#2563eb', bgClass: 'bg-blue-600' },
@@ -109,12 +117,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, [initialDataUrl]);
 
     const handleClear = () => {
-        canvasRef.current.clear();
+        if (canvasRef.current) canvasRef.current.clear();
         setIsEmpty(true);
         onSave(''); // Clear saved data
+        isLineSnappedRef.current = false;
     };
 
     const handleUndo = () => {
+        if (!canvasRef.current) return;
         const data = canvasRef.current.toData();
         if (data && data.length > 0) {
             data.pop(); // remove last stroke
@@ -128,7 +138,184 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
+    const handleBeginStroke = (e) => {
+        isDrawingRef.current = true;
+        isLineSnappedRef.current = false;
+
+        if (canvasRef.current && canvasRef.current._signaturePad) {
+            const pad = canvasRef.current._signaturePad;
+
+            // Get the first point from the pad's active stroke if available
+            if (pad._data && pad._data.length > 0) {
+                const currentStroke = pad._data[pad._data.length - 1];
+                if (currentStroke && currentStroke.points && currentStroke.points.length > 0) {
+                    strokeStartRef.current = currentStroke.points[0];
+                    lastPointRef.current = currentStroke.points[0];
+                }
+            }
+        }
+
+        startHoldTimer();
+    };
+
+    // Use a global pointer move listener while drawing to bypass touch-action issues
+    useEffect(() => {
+        const handleGlobalPointerMove = (e) => {
+            if (!isDrawingRef.current) return;
+            if (isLineSnappedRef.current) return;
+
+            if (canvasRef.current && canvasRef.current._signaturePad) {
+                const pad = canvasRef.current._signaturePad;
+
+                // try to extract coordinates from standard mouse/touch events
+                let clientX, clientY;
+                if (e.touches && e.touches.length > 0) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                if (clientX === undefined || clientY === undefined) return;
+
+                // Create a basic point 
+                const rect = canvasRef.current.getCanvas().getBoundingClientRect();
+                const currentPoint = {
+                    x: clientX - rect.left,
+                    y: clientY - rect.top,
+                    time: Date.now()
+                };
+
+                if (lastPointRef.current) {
+                    const dx = currentPoint.x - lastPointRef.current.x;
+                    const dy = currentPoint.y - lastPointRef.current.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    // If moving significantly, reset the hold timer
+                    if (dist > 5) {
+                        // console.log("Pointer moving... resetting timer. Dist:", dist);
+                        startHoldTimer();
+                        lastPointRef.current = currentPoint;
+                    }
+                } else {
+                    lastPointRef.current = currentPoint;
+                    if (!strokeStartRef.current) {
+                        strokeStartRef.current = currentPoint;
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('pointermove', handleGlobalPointerMove, { passive: false });
+        window.addEventListener('touchmove', handleGlobalPointerMove, { passive: false });
+
+        return () => {
+            window.removeEventListener('pointermove', handleGlobalPointerMove);
+            window.removeEventListener('touchmove', handleGlobalPointerMove);
+        };
+    }, []);
+
+    const startHoldTimer = () => {
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+
+        // If held still for 600ms, snap to line
+        holdTimerRef.current = setTimeout(() => {
+            snapToStraightLine();
+        }, 500);
+    };
+
+    const snapToStraightLine = () => {
+        console.log("Snapping check fired!");
+        if (!isDrawingRef.current) {
+            console.log("Snap aborted: isDrawing=false");
+            return;
+        }
+        if (isLineSnappedRef.current) {
+            console.log("Snap aborted: isLineSnapped=true");
+            return;
+        }
+
+        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+        if (!strokeStartRef.current || !lastPointRef.current) {
+            console.log("Snap aborted: missing start or last point");
+            return;
+        }
+
+        const pad = canvasRef.current._signaturePad;
+        const canvas = canvasRef.current.getCanvas();
+        const ctx = canvas.getContext("2d");
+
+        // Grab the internal data array completely
+        const rawData = pad.toData();
+
+        if (rawData && rawData.length > 0) {
+            // Get the current stroke being drawn (the last one in the array)
+            const currentStroke = rawData[rawData.length - 1];
+
+            // Need at least start and end points
+            if (currentStroke && currentStroke.points && currentStroke.points.length > 2) {
+                // Ensure we use the exact start and end from the stroke data itself
+                const start = currentStroke.points[0];
+                const end = currentStroke.points[currentStroke.points.length - 1];
+
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                console.log("Snap distance calculated:", distance);
+
+                // Only snap if distance is significant enough
+                if (distance > 20) {
+                    console.log("Snapping to perfect line!");
+                    isLineSnappedRef.current = true;
+
+                    // 1. Force pad to end the current stroke
+                    pad._strokeEnd(new Event('mouseup'));
+
+                    // 2. Erase the wobbly line by popping it from data and redrawing
+                    rawData.pop();
+
+                    // 3. Create a perfect straight line stroke object
+                    const straightPoints = [];
+                    const steps = Math.max(10, Math.floor(distance / 5));
+
+                    const timeStart = start.time;
+                    const timeEnd = end.time;
+                    const timeStep = (timeEnd - timeStart) / steps;
+
+                    for (let i = 0; i <= steps; i++) {
+                        const t = i / steps;
+                        straightPoints.push({
+                            x: start.x + dx * t,
+                            y: start.y + dy * t,
+                            time: timeStart + (timeStep * i)
+                        });
+                    }
+
+                    // 4. Add the straight line to the data
+                    rawData.push({
+                        ...currentStroke,
+                        points: straightPoints
+                    });
+
+                    // 5. Redraw canvas cleanly from memory
+                    pad.fromData(rawData);
+
+                    // Trigger save
+                    handleEndStroke();
+                } else {
+                    console.log("Line too short to snap");
+                }
+            } else {
+                console.log("Not enough points to snap");
+            }
+        }
+    };
+
     const handleEndStroke = () => {
+        isDrawingRef.current = false;
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+
         setIsEmpty(canvasRef.current.isEmpty());
         // Auto-save on every stroke finish
         if (!canvasRef.current.isEmpty()) {
@@ -216,7 +403,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 </div>
             )}
 
-            <div ref={containerRef} className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full`} style={overlayMode ? {} : { height: '500px' }}>
+            <div
+                ref={containerRef}
+                className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full`}
+                style={overlayMode ? {} : { height: '500px' }}
+            >
                 <SignatureCanvas
                     ref={canvasRef}
                     penColor={penColor}
@@ -228,6 +419,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                         className: `w-full h-full cursor-crosshair ${isDrawingMode ? 'touch-none select-none' : ''}`,
                         style: { display: 'block' }
                     }}
+                    onBegin={handleBeginStroke}
                     onEnd={handleEndStroke}
                 />
             </div>
