@@ -15,6 +15,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         { name: 'น้ำเงิน (Blue)', value: '#2563eb', bgClass: 'bg-blue-600' },
         { name: 'แดง (Red)', value: '#dc2626', bgClass: 'bg-red-600' },
         { name: 'เขียว (Green)', value: '#16a34a', bgClass: 'bg-green-600' },
+        { name: 'ม่วง (Purple)', value: '#9333ea', bgClass: 'bg-purple-600' },
+        { name: 'ชมพู (Pink)', value: '#db2777', bgClass: 'bg-pink-600' },
+        { name: 'ส้ม (Orange)', value: '#ea580c', bgClass: 'bg-orange-600' },
+        { name: 'ฟ้า (Teal)', value: '#0d9488', bgClass: 'bg-teal-600' },
     ];
 
     // Determine current canvas properties based on tool and color
@@ -28,7 +32,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             '#0f172a': '#fde047', // Yellow for default (black)
             '#2563eb': '#93c5fd', // Light Blue
             '#dc2626': '#fca5a5', // Light Red
-            '#16a34a': '#86efac'  // Light Green
+            '#16a34a': '#86efac', // Light Green
+            '#9333ea': '#d8b4fe', // Light Purple
+            '#db2777': '#fbcfe8', // Light Pink
+            '#ea580c': '#fdba74', // Light Orange
+            '#0d9488': '#5eead4'  // Light Teal
         };
         penColor = solidMap[currentColor] || '#fde047';
         minWidth = 14;
