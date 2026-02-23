@@ -24,14 +24,13 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     let velocityFilterWeight = 0.7;
 
     if (activeTool === 'highlighter') {
-        const rgbMap = {
-            '#0f172a': '250, 204, 21', // Yellow for default (black)
-            '#2563eb': '59, 130, 246', // Blue
-            '#dc2626': '239, 68, 68',  // Red
-            '#16a34a': '34, 197, 94'   // Green
+        const solidMap = {
+            '#0f172a': '#fde047', // Yellow for default (black)
+            '#2563eb': '#93c5fd', // Light Blue
+            '#dc2626': '#fca5a5', // Light Red
+            '#16a34a': '#86efac'  // Light Green
         };
-        const rgb = rgbMap[currentColor] || '250, 204, 21';
-        penColor = `rgba(${rgb}, 0.1)`; // Extremely low opacity
+        penColor = solidMap[currentColor] || '#fde047';
         minWidth = 14;
         maxWidth = 20;
         velocityFilterWeight = 0.5; // Moderate smoothing
@@ -112,87 +111,85 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
-    if (overlayMode && !isDrawingMode) {
-        return null; // Hidden when not in drawing mode and acts as an overlay
-    }
-
     return (
-        <div className={`flex flex-col gap-3 w-full ${overlayMode ? 'absolute inset-0 z-50 pointer-events-none' : ''}`}>
+        <div className={`w-full ${overlayMode ? 'absolute inset-0 pointer-events-none' : 'flex flex-col gap-3'}`}>
             {/* Toolbar */}
-            <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-1 border-b border-slate-100 pb-3 ${overlayMode ? 'pointer-events-auto bg-white/90 backdrop-blur-sm p-3 rounded-b-xl shadow-sm border border-slate-200 mt-2 mx-4 sticky top-4' : ''}`}>
-                <div className="flex flex-wrap items-center gap-2">
-                    {/* Tool Picker */}
-                    <div className="flex bg-slate-100 p-1 rounded-lg">
-                        <button
-                            type="button"
-                            onClick={() => setActiveTool('pen')}
-                            className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'pen' ? 'bg-white shadow-sm text-primary-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                            title="ปากกา (Pen)"
-                        >
-                            <PenTool size={18} />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTool('highlighter')}
-                            className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'highlighter' ? 'bg-white shadow-sm text-amber-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                            title="ไฮไลต์ (Highlighter)"
-                        >
-                            <Highlighter size={18} />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTool('eraser')}
-                            className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'eraser' ? 'bg-white shadow-sm text-pink-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                            title="ยางลบ (Eraser)"
-                        >
-                            <Eraser size={18} />
-                        </button>
-                    </div>
-
-                    {/* Separator */}
-                    <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block"></div>
-
-                    {/* Color Picker */}
-                    <div className="flex gap-2 items-center bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100">
-                        {colors.map(c => (
+            {(!overlayMode || isDrawingMode) && (
+                <div className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${overlayMode ? 'bg-white/95 backdrop-blur-md p-3 rounded-2xl shadow-lg border border-slate-200 mt-4 mx-4 relative z-50 pointer-events-auto ring-1 ring-slate-900/5' : 'px-1 border-b border-slate-100 pb-3'}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {/* Tool Picker */}
+                        <div className="flex bg-slate-100 p-1 rounded-lg">
                             <button
-                                key={c.value}
                                 type="button"
-                                onClick={() => { setCurrentColor(c.value); if (activeTool === 'eraser') setActiveTool('pen'); }}
-                                className={`w-6 h-6 rounded-full border-2 transition-transform outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 ${currentColor === c.value && activeTool !== 'eraser' ? 'scale-125 border-primary-300' : 'border-transparent hover:scale-110'} ${c.bgClass} shadow-sm`}
-                                title={c.name}
-                                aria-label={`เลือกสี ${c.name}`}
-                            />
-                        ))}
+                                onClick={() => setActiveTool('pen')}
+                                className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'pen' ? 'bg-white shadow-sm text-primary-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
+                                title="ปากกา (Pen)"
+                            >
+                                <PenTool size={18} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTool('highlighter')}
+                                className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'highlighter' ? 'bg-white shadow-sm text-amber-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
+                                title="ไฮไลต์ (Highlighter)"
+                            >
+                                <Highlighter size={18} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveTool('eraser')}
+                                className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'eraser' ? 'bg-white shadow-sm text-pink-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
+                                title="ยางลบ (Eraser)"
+                            >
+                                <Eraser size={18} />
+                            </button>
+                        </div>
+
+                        {/* Separator */}
+                        <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block"></div>
+
+                        {/* Color Picker */}
+                        <div className="flex gap-2 items-center bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100">
+                            {colors.map(c => (
+                                <button
+                                    key={c.value}
+                                    type="button"
+                                    onClick={() => { setCurrentColor(c.value); if (activeTool === 'eraser') setActiveTool('pen'); }}
+                                    className={`w-6 h-6 rounded-full border-2 transition-transform outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 ${currentColor === c.value && activeTool !== 'eraser' ? 'scale-125 border-primary-300' : 'border-transparent hover:scale-110'} ${c.bgClass} shadow-sm`}
+                                    title={c.name}
+                                    aria-label={`เลือกสี ${c.name}`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 w-full sm:w-auto justify-end mt-2 sm:mt-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={handleUndo}
+                            disabled={isEmpty}
+                            className="text-slate-600 hover:text-slate-900"
+                        >
+                            <Undo className="w-4 h-4 mr-1.5" /> ย้อนกลับ
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClear}
+                            disabled={isEmpty}
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                        >
+                            <RefreshCcw className="w-4 h-4 mr-1.5" /> ล้าง
+                        </Button>
                     </div>
                 </div>
+            )}
 
-                {/* Actions */}
-                <div className="flex gap-2 w-full sm:w-auto justify-end mt-2 sm:mt-0">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleUndo}
-                        disabled={isEmpty}
-                        className="text-slate-600 hover:text-slate-900"
-                    >
-                        <Undo className="w-4 h-4 mr-1.5" /> ย้อนกลับ
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleClear}
-                        disabled={isEmpty}
-                        className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                    >
-                        <RefreshCcw className="w-4 h-4 mr-1.5" /> ล้าง
-                    </Button>
-                </div>
-            </div>
-
-            <div ref={containerRef} className={`${overlayMode ? 'flex-1 pointer-events-auto' : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative w-full touch-none'} w-full`} style={overlayMode ? {} : { height: '500px' }}>
+            <div ref={containerRef} className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full`} style={overlayMode ? {} : { height: '500px' }}>
                 <SignatureCanvas
                     ref={canvasRef}
                     penColor={penColor}

@@ -148,15 +148,13 @@ export default function StudyMode({ quizId, navigateTo }) {
                 </div>
 
                 {/* Drawing Overlay */}
-                <div className={`absolute inset-0 z-40 pointer-events-none ${isDrawingMode ? 'pointer-events-auto' : ''}`}>
-                    <DrawingCanvas
-                        key={`study-canvas-${currentSlideIndex}`}
-                        initialDataUrl={slideNotes[currentSlideIndex] || ''}
-                        onSave={handleDrawingChange}
-                        overlayMode={true}
-                        isDrawingMode={isDrawingMode}
-                    />
-                </div>
+                <DrawingCanvas
+                    key={`study-canvas-${currentSlideIndex}`}
+                    initialDataUrl={slideNotes[currentSlideIndex] || ''}
+                    onSave={handleDrawingChange}
+                    overlayMode={true}
+                    isDrawingMode={isDrawingMode}
+                />
             </Card>
 
             <div className="flex justify-end pt-4">
