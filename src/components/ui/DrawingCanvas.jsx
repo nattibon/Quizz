@@ -11,9 +11,40 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const [currentColor, setCurrentColor] = useState('#0f172a'); // default slate-900
 
     // Hold-to-snap to straight line states
+    const startPointRef = useRef(null);
+    const lastPointRef = useRef(null);
+    const holdTimerRef = useRef(null);
     const isDrawingRef = useRef(false);
     const isLineSnappedRef = useRef(false);
+    const isBlockDrawingRef = useRef(false);
+    const [isBlockDrawing, setIsBlockDrawing] = useState(false);
     const [lineSnapEnabled, setLineSnapEnabled] = useState(true);
+
+    // Global listener to release the UI block when user lifts pen after snapping
+    useEffect(() => {
+        const handleGlobalUp = () => {
+            if (isBlockDrawingRef.current) {
+                setIsBlockDrawing(false);
+                isBlockDrawingRef.current = false;
+                // Small delay to ensure touch events are completely flushed before re-enabling
+                setTimeout(() => {
+                    if (canvasRef.current && canvasRef.current._signaturePad) {
+                        canvasRef.current._signaturePad.on();
+                    }
+                }, 50);
+            }
+        };
+        window.addEventListener('pointerup', handleGlobalUp);
+        window.addEventListener('touchend', handleGlobalUp);
+        window.addEventListener('touchcancel', handleGlobalUp);
+
+        return () => {
+            window.removeEventListener('pointerup', handleGlobalUp);
+            window.removeEventListener('touchend', handleGlobalUp);
+            window.removeEventListener('touchcancel', handleGlobalUp);
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        };
+    }, []);
 
     const colors = [
         { name: 'ดำ (Black)', value: '#0f172a', bgClass: 'bg-slate-900' },
@@ -137,23 +168,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
     // Track continuous hold states without relying on DOM events
     const holdIntervalRef = useRef(null);
-    const holdStateRef = useRef({ lastX: 0, lastY: 0, holdStartTime: 0 });
-
-    const handleBeginStroke = (e) => {
-        isDrawingRef.current = true;
-        isLineSnappedRef.current = false;
-        holdStateRef.current = { lastX: 0, lastY: 0, holdStartTime: Date.now() };
-
-        if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-        holdIntervalRef.current = setInterval(checkSnapToLine, 50); // Poll every 50ms
-    };
-
-    const handleEndStroke = () => {
+    const handleEndStrokeNative = () => {
         isDrawingRef.current = false;
-        if (holdIntervalRef.current) {
-            clearInterval(holdIntervalRef.current);
-            holdIntervalRef.current = null;
-        }
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
 
         setIsEmpty(canvasRef.current.isEmpty());
         // Auto-save on every stroke finish
@@ -164,79 +181,127 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
-    const checkSnapToLine = () => {
-        // Abort if not drawing, already snapped, or missing pad
+    const handlePointerDown = (e) => {
+        if (isBlockDrawingRef.current) return;
+        if (!containerRef.current) return;
+
+        const rect = containerRef.current.getBoundingClientRect();
+
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        if (clientX === undefined || clientY === undefined) return;
+
+        const point = { x: clientX - rect.left, y: clientY - rect.top, time: Date.now() };
+        startPointRef.current = point;
+        lastPointRef.current = point;
+
+        isDrawingRef.current = true;
+        isLineSnappedRef.current = false;
+
+        startHoldTimer();
+    };
+
+    const handlePointerMove = (e) => {
+        if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawingRef.current) return;
+
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        if (clientX === undefined || clientY === undefined) return;
+
+        const rect = containerRef.current.getBoundingClientRect();
+        const point = { x: clientX - rect.left, y: clientY - rect.top, time: Date.now() };
+
+        if (!lastPointRef.current) {
+            lastPointRef.current = point;
+            startHoldTimer();
+            return;
+        }
+
+        const dx = point.x - lastPointRef.current.x;
+        const dy = point.y - lastPointRef.current.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 15) {
+            lastPointRef.current = point;
+            startHoldTimer();
+        }
+    };
+
+    const handlePointerUp = () => {
+        isDrawingRef.current = false;
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+    };
+
+    const startHoldTimer = () => {
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = setTimeout(snapToStraightLine, 600);
+    };
+
+    const snapToStraightLine = () => {
         if (!isDrawingRef.current || isLineSnappedRef.current) return;
+        const start = startPointRef.current;
+        const end = lastPointRef.current;
+
+        if (!start || !end) return;
         if (!canvasRef.current || !canvasRef.current._signaturePad) return;
 
-        const pad = canvasRef.current._signaturePad;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Use internal _data to avoid heavy serialization of toData() every 50ms
-        const rawData = pad._data;
-        if (!rawData || rawData.length === 0) return;
+        if (distance > 30) {
+            isLineSnappedRef.current = true;
 
-        const currentStroke = rawData[rawData.length - 1];
-        if (!currentStroke || !currentStroke.points || currentStroke.points.length < 3) return;
+            const pad = canvasRef.current._signaturePad;
 
-        const start = currentStroke.points[0];
-        const end = currentStroke.points[currentStroke.points.length - 1];
+            // toData() intentionally gets ONLY previously completed strokes 
+            const history = pad.toData() || [];
 
-        // Measure distance from the last known hold center
-        const dxHold = end.x - holdStateRef.current.lastX;
-        const dyHold = end.y - holdStateRef.current.lastY;
-        const distHold = Math.sqrt(dxHold * dxHold + dyHold * dyHold);
+            // Generate points
+            const straightPoints = [];
+            const steps = Math.max(10, Math.floor(distance / 5));
+            const timeStep = Math.max(10, (end.time - start.time) / steps);
 
-        if (distHold > 15) {
-            // Pen moved significantly, reset the hold center and timer
-            holdStateRef.current = { lastX: end.x, lastY: end.y, holdStartTime: Date.now() };
-        } else {
-            // Pen is held within a 15px radius 
-            if (Date.now() - holdStateRef.current.holdStartTime > 600) {
-                // Held still for 600ms! Check if overall line is long enough to snap
-                const lineDx = end.x - start.x;
-                const lineDy = end.y - start.y;
-                const lineDistance = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
-
-                if (lineDistance > 30) {
-                    isLineSnappedRef.current = true;
-                    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
-
-                    // Stop current drawing action in pad smoothly
-                    pad._strokeEnd(new Event('mouseup'));
-
-                    // Replace the latest stroke with a straight line using clean toData()
-                    const finalData = pad.toData();
-                    finalData.pop();
-
-                    const straightPoints = [];
-                    const steps = Math.max(10, Math.floor(lineDistance / 5));
-
-                    // We must carry over the time values for react-signature-canvas to render smoothly
-                    const timeStart = start.time;
-                    const timeEnd = end.time;
-                    const timeStep = Math.max(10, (timeEnd - timeStart) / steps);
-
-                    for (let i = 0; i <= steps; i++) {
-                        const t = i / steps;
-                        straightPoints.push({
-                            x: start.x + lineDx * t,
-                            y: start.y + lineDy * t,
-                            time: timeStart + (timeStep * i)
-                        });
-                    }
-
-                    finalData.push({
-                        ...currentStroke,
-                        points: straightPoints
-                    });
-
-                    // Redraw canvas with the perfect straight line
-                    pad.fromData(finalData);
-
-                    // Trigger immediate save as the stroke effectively ended
-                    handleEndStroke();
-                }
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                straightPoints.push({
+                    x: start.x + dx * t,
+                    y: start.y + dy * t,
+                    time: start.time + (timeStep * i)
+                });
             }
+
+            // Append our pristine stroke
+            history.push({
+                penColor: penColor,
+                minWidth: minWidth,
+                maxWidth: maxWidth,
+                velocityFilterWeight: velocityFilterWeight,
+                points: straightPoints
+            });
+
+            // Detach pad's internal events first
+            pad.off();
+
+            // Block our container from sending pointer events to canvas
+            isBlockDrawingRef.current = true;
+            setIsBlockDrawing(true);
+
+            // Load history (which clears canvas & draws our straight line, obliterating the uncompleted wobbly trace)
+            pad.fromData(history);
+
+            // Trigger save notification explicitly
+            handleEndStrokeNative();
         }
     };
 
@@ -321,8 +386,16 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
             <div
                 ref={containerRef}
-                className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full`}
+                className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full ${isBlockDrawing ? 'pointer-events-none' : ''}`}
                 style={overlayMode ? {} : { height: '500px' }}
+                onPointerDownCapture={handlePointerDown}
+                onPointerMoveCapture={handlePointerMove}
+                onPointerUpCapture={handlePointerUp}
+                onPointerCancelCapture={handlePointerUp}
+                onTouchStartCapture={handlePointerDown}
+                onTouchMoveCapture={handlePointerMove}
+                onTouchEndCapture={handlePointerUp}
+                onTouchCancelCapture={handlePointerUp}
             >
                 <SignatureCanvas
                     ref={canvasRef}
@@ -335,8 +408,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                         className: `w-full h-full cursor-crosshair ${isDrawingMode ? 'touch-none select-none' : ''}`,
                         style: { display: 'block' }
                     }}
-                    onBegin={handleBeginStroke}
-                    onEnd={handleEndStroke}
+                    onEnd={handleEndStrokeNative}
                 />
             </div>
 
