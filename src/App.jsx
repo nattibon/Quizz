@@ -9,6 +9,7 @@ import StudyMode from './views/StudyMode';
 import PrintView from './views/PrintView';
 
 function AppContent() {
+  const { loading } = useQuiz();
   const [currentView, setCurrentView] = useState('dashboard'); // dashboard, editor, exam, result
   const [activeQuizId, setActiveQuizId] = useState(null);
   const [examResult, setExamResult] = useState(null);
@@ -47,7 +48,12 @@ function AppContent() {
       </header>
 
       {/* Main Content Area */}
-      {currentView === 'print' ? (
+      {loading ? (
+        <main className="flex-1 flex flex-col items-center justify-center min-h-[50vh]">
+          <div className="w-12 h-12 border-4 border-slate-200 border-t-primary-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-slate-500 font-medium">กำลังโหลดข้อมูลจากเซิร์ฟเวอร์...</p>
+        </main>
+      ) : currentView === 'print' ? (
         <main className="w-full">
           <PrintView quizId={activeQuizId} navigateTo={navigateTo} />
         </main>
