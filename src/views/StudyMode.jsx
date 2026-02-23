@@ -3,13 +3,15 @@ import { useQuiz } from '../context/QuizContext';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
 import { Input, Textarea } from '../components/ui/Input';
-import { ArrowLeft, Play, LayoutList, Image as ImageIcon, Video, Trash2, Plus } from 'lucide-react';
+import { ArrowLeft, Play, LayoutList, Image as ImageIcon, Video, Trash2, Plus, Pen } from 'lucide-react';
+import DrawingCanvas from '../components/ui/DrawingCanvas';
 
 export default function StudyMode({ quizId, navigateTo }) {
     const { quizzes } = useQuiz();
     const quiz = quizzes.find(q => q.id === quizId);
 
     const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+    const [slideNotes, setSlideNotes] = useState({}); // Stores drawn data URLs per slide index
 
     if (!quiz) {
         return (
@@ -48,6 +50,13 @@ export default function StudyMode({ quizId, navigateTo }) {
 
     const handleNext = () => !isLastSlide && setCurrentSlideIndex(prev => prev + 1);
     const handlePrev = () => !isFirstSlide && setCurrentSlideIndex(prev => prev - 1);
+
+    const handleDrawingChange = (dataUrl) => {
+        setSlideNotes({
+            ...slideNotes,
+            [currentSlideIndex]: dataUrl
+        });
+    };
 
     return (
         <div className="max-w-4xl mx-auto space-y-6">
@@ -115,6 +124,23 @@ export default function StudyMode({ quizId, navigateTo }) {
                             </div>
                         </div>
                     )}
+
+                    {/* Scratchpad */}
+                    <div className="w-full mt-12 border-t border-slate-200 pt-8">
+                        <div className="flex flex-col gap-2 mb-4">
+                            <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                                <Pen className="w-5 h-5 text-primary-600" /> กระดานทด / จดบันทึก
+                            </h4>
+                            <p className="text-sm text-slate-500">
+                                ใช้กระดานด้านล่างนี้เพื่อทดเลข ขีดเขียน หรือจดโน้ตย่อขณะอ่านเนื้อหา (ระบบจะจำรอยขีดเขียนไว้ให้ในแต่ละหน้า)
+                            </p>
+                        </div>
+                        <DrawingCanvas
+                            key={`study-canvas-${currentSlideIndex}`}
+                            initialDataUrl={slideNotes[currentSlideIndex] || ''}
+                            onSave={handleDrawingChange}
+                        />
+                    </div>
                 </div>
             </Card>
 
