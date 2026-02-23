@@ -11,9 +11,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const [currentColor, setCurrentColor] = useState('#0f172a'); // default slate-900
 
     // Hold-to-snap to straight line states
-    const holdTimerRef = useRef(null);
-    const strokeStartRef = useRef(null);
-    const lastPointRef = useRef(null);
     const isDrawingRef = useRef(false);
     const isLineSnappedRef = useRef(false);
     const [lineSnapEnabled, setLineSnapEnabled] = useState(true);
@@ -138,150 +135,25 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
+    // Track continuous hold states without relying on DOM events
+    const holdIntervalRef = useRef(null);
+    const holdStateRef = useRef({ lastX: 0, lastY: 0, holdStartTime: 0 });
+
     const handleBeginStroke = (e) => {
         isDrawingRef.current = true;
         isLineSnappedRef.current = false;
+        holdStateRef.current = { lastX: 0, lastY: 0, holdStartTime: Date.now() };
 
-        if (canvasRef.current && canvasRef.current._signaturePad) {
-            const pad = canvasRef.current._signaturePad;
-
-            // Get the first point from the pad's active stroke if available
-            if (pad._data && pad._data.length > 0) {
-                const currentStroke = pad._data[pad._data.length - 1];
-                if (currentStroke && currentStroke.points && currentStroke.points.length > 0) {
-                    strokeStartRef.current = currentStroke.points[0];
-                    lastPointRef.current = currentStroke.points[0];
-                }
-            }
-        }
-
-        startHoldTimer();
-    };
-
-    // Use pointer events directly on the canvas to bypass touch-action issues and account for stylus jitter
-    useEffect(() => {
-        const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
-
-        // This keeps track of the coordinates to see if the user is holding still
-        let localLastPoint = null;
-
-        const handlePointerMove = (e) => {
-            if (!isDrawingRef.current) return;
-            if (isLineSnappedRef.current) return;
-
-            // Extract coordinates
-            let clientX, clientY;
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            } else if (e.clientX !== undefined) {
-                clientX = e.clientX;
-                clientY = e.clientY;
-            } else {
-                return;
-            }
-
-            if (localLastPoint) {
-                const dx = clientX - localLastPoint.x;
-                const dy = clientY - localLastPoint.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                // High-DPI screens and stylus pens jitter constantly.
-                // A threshold of 15px prevents micro-movements from resetting the hold timer
-                if (dist > 15) {
-                    startHoldTimer();
-                    localLastPoint = { x: clientX, y: clientY };
-                }
-            } else {
-                localLastPoint = { x: clientX, y: clientY };
-            }
-        };
-
-        canvas.addEventListener('pointermove', handlePointerMove, { passive: true });
-        canvas.addEventListener('touchmove', handlePointerMove, { passive: true });
-
-        return () => {
-            canvas.removeEventListener('pointermove', handlePointerMove);
-            canvas.removeEventListener('touchmove', handlePointerMove);
-        };
-    }, []);
-
-    const startHoldTimer = () => {
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-
-        // If held still for 600ms, snap to line
-        holdTimerRef.current = setTimeout(() => {
-            snapToStraightLine();
-        }, 500);
-    };
-
-    const snapToStraightLine = () => {
-        if (!isDrawingRef.current) return;
-        if (isLineSnappedRef.current) return;
-
-        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-
-        const pad = canvasRef.current._signaturePad;
-
-        const rawData = pad.toData();
-        if (rawData && rawData.length > 0) {
-            const currentStroke = rawData[rawData.length - 1];
-
-            if (currentStroke && currentStroke.points && currentStroke.points.length > 2) {
-                const start = currentStroke.points[0];
-                const end = currentStroke.points[currentStroke.points.length - 1];
-
-                const dx = end.x - start.x;
-                const dy = end.y - start.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                // Need at least a visible line to snap (30 units)
-                if (distance > 30) {
-                    isLineSnappedRef.current = true;
-
-                    // 1. Force pad to end the current stroke
-                    pad._strokeEnd(new Event('mouseup'));
-
-                    // 2. Erase the wobbly line by popping it from data and redrawing
-                    rawData.pop();
-
-                    // 3. Create a perfect straight line stroke object
-                    const straightPoints = [];
-                    const steps = Math.max(10, Math.floor(distance / 5));
-
-                    const timeStart = start.time;
-                    const timeEnd = end.time;
-                    const timeStep = (timeEnd - timeStart) / steps;
-
-                    for (let i = 0; i <= steps; i++) {
-                        const t = i / steps;
-                        straightPoints.push({
-                            x: start.x + dx * t,
-                            y: start.y + dy * t,
-                            time: timeStart + (timeStep * i)
-                        });
-                    }
-
-                    // 4. Add the straight line to the data
-                    rawData.push({
-                        ...currentStroke,
-                        points: straightPoints
-                    });
-
-                    // 5. Redraw canvas cleanly from memory
-                    pad.fromData(rawData);
-
-                    // Trigger save
-                    handleEndStroke();
-                }
-            }
-        }
+        if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+        holdIntervalRef.current = setInterval(checkSnapToLine, 50); // Poll every 50ms
     };
 
     const handleEndStroke = () => {
         isDrawingRef.current = false;
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        if (holdIntervalRef.current) {
+            clearInterval(holdIntervalRef.current);
+            holdIntervalRef.current = null;
+        }
 
         setIsEmpty(canvasRef.current.isEmpty());
         // Auto-save on every stroke finish
@@ -291,6 +163,83 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             onSave('');
         }
     };
+
+    const checkSnapToLine = () => {
+        // Abort if not drawing, already snapped, or missing pad
+        if (!isDrawingRef.current || isLineSnappedRef.current) return;
+        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+
+        const pad = canvasRef.current._signaturePad;
+
+        // Use internal _data to avoid heavy serialization of toData() every 50ms
+        const rawData = pad._data;
+        if (!rawData || rawData.length === 0) return;
+
+        const currentStroke = rawData[rawData.length - 1];
+        if (!currentStroke || !currentStroke.points || currentStroke.points.length < 3) return;
+
+        const start = currentStroke.points[0];
+        const end = currentStroke.points[currentStroke.points.length - 1];
+
+        // Measure distance from the last known hold center
+        const dxHold = end.x - holdStateRef.current.lastX;
+        const dyHold = end.y - holdStateRef.current.lastY;
+        const distHold = Math.sqrt(dxHold * dxHold + dyHold * dyHold);
+
+        if (distHold > 15) {
+            // Pen moved significantly, reset the hold center and timer
+            holdStateRef.current = { lastX: end.x, lastY: end.y, holdStartTime: Date.now() };
+        } else {
+            // Pen is held within a 15px radius 
+            if (Date.now() - holdStateRef.current.holdStartTime > 600) {
+                // Held still for 600ms! Check if overall line is long enough to snap
+                const lineDx = end.x - start.x;
+                const lineDy = end.y - start.y;
+                const lineDistance = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
+
+                if (lineDistance > 30) {
+                    isLineSnappedRef.current = true;
+                    if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
+
+                    // Stop current drawing action in pad smoothly
+                    pad._strokeEnd(new Event('mouseup'));
+
+                    // Replace the latest stroke with a straight line using clean toData()
+                    const finalData = pad.toData();
+                    finalData.pop();
+
+                    const straightPoints = [];
+                    const steps = Math.max(10, Math.floor(lineDistance / 5));
+
+                    // We must carry over the time values for react-signature-canvas to render smoothly
+                    const timeStart = start.time;
+                    const timeEnd = end.time;
+                    const timeStep = Math.max(10, (timeEnd - timeStart) / steps);
+
+                    for (let i = 0; i <= steps; i++) {
+                        const t = i / steps;
+                        straightPoints.push({
+                            x: start.x + lineDx * t,
+                            y: start.y + lineDy * t,
+                            time: timeStart + (timeStep * i)
+                        });
+                    }
+
+                    finalData.push({
+                        ...currentStroke,
+                        points: straightPoints
+                    });
+
+                    // Redraw canvas with the perfect straight line
+                    pad.fromData(finalData);
+
+                    // Trigger immediate save as the stroke effectively ended
+                    handleEndStroke();
+                }
+            }
+        }
+    };
+
 
     return (
         <div className={`w-full ${overlayMode ? 'absolute inset-0 pointer-events-none' : 'flex flex-col gap-3'}`}>
