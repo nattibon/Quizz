@@ -24,48 +24,16 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const cachedStrokesRef = useRef([]);
     const bgImageRef = useRef(null);
 
-    // Global listener to release the UI block when user lifts pen after snapping
-    useEffect(() => {
-        const handleGlobalUp = () => {
-            // Cancel any pending hold timer (this is the reliable place to do it)
-            if (holdTimerRef.current) {
-                clearTimeout(holdTimerRef.current);
-                holdTimerRef.current = null;
-            }
-            isDrawingRef.current = false;
-            if (holdStateRef.current) holdStateRef.current = null;
-
-            if (isBlockDrawingRef.current) {
-                setIsBlockDrawing(false);
-                isBlockDrawingRef.current = false;
-                // Small delay to ensure touch events are completely flushed before re-enabling
-                setTimeout(() => {
-                    if (canvasRef.current) {
-                        canvasRef.current.on(); // react-signature-canvas public API
-                    }
-                }, 50);
-            }
-        };
-        window.addEventListener('pointerup', handleGlobalUp);
-        window.addEventListener('touchend', handleGlobalUp);
-        window.addEventListener('touchcancel', handleGlobalUp);
-
-        return () => {
-            window.removeEventListener('pointerup', handleGlobalUp);
-            window.removeEventListener('touchend', handleGlobalUp);
-            window.removeEventListener('touchcancel', handleGlobalUp);
-            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        };
-    }, []);
-
     // Block finger touch at the canvas level using capture-phase events.
-    // We MUST block all touch events (start, move, end) for fingers. If we only block start,
-    // finger movements (like palm resting) leak into signature_pad's touchmove handler,
-    // which appends the points to the previously drawn stroke and causes letters to connect!
-    // Calling preventDefault() perfectly blocks page scroll for finger swipes over the canvas.
+    // Also CRITICALLY disables signature_pad's internal mouse/touch listeners.
+    // We will completely drive drawing using modern React PointerEvents below.
     useEffect(() => {
         const canvas = canvasRef.current?.getCanvas();
-        if (!canvas) return;
+        const pad = canvasRef.current?.getSignaturePad();
+        if (!canvas || !pad) return;
+
+        // Permanently turn off signature_pad's legacy event listeners
+        pad.off();
 
         const blockFingerTouch = (event) => {
             const touch = event.changedTouches?.[0] || event.targetTouches?.[0];
@@ -394,32 +362,52 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const handlePointerDown = (e) => {
         // Only allow pen (Apple Pencil / Stylus) or mouse. Reject finger touch.
         if (e.pointerType === 'touch') return;
-        if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
+        if (isBlockDrawingRef.current) return;
 
-        isDrawingRef.current = true;
-        isLineSnappedRef.current = false;
-
-        // Start tracking position manually capturing DOM events
-        if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            holdStateRef.current = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
+        // 1. Manually command signature_pad to begin drawing
+        if (isDrawingMode) {
+            try { e.target.setPointerCapture(e.pointerId); } catch (err) { }
+            const pad = canvasRef.current?.getSignaturePad();
+            if (pad) {
+                pad._strokeBegin({ clientX: e.clientX, clientY: e.clientY });
+            }
+            isDrawingRef.current = true;
         }
 
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        holdTimerRef.current = setTimeout(() => {
-            if (logicRef.current.snapToStraightLine) {
-                logicRef.current.snapToStraightLine();
+        // 2. Start tracking for straight-line snap (only for pen/highlighter)
+        isLineSnappedRef.current = false;
+        if (isDrawingMode && activeTool !== 'eraser') {
+            if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                holdStateRef.current = {
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top
+                };
             }
-        }, 500);
+
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = setTimeout(() => {
+                if (logicRef.current.snapToStraightLine) {
+                    logicRef.current.snapToStraightLine();
+                }
+            }, 500);
+        }
     };
 
     const handlePointerMove = (e) => {
-        // Only track pen/mouse, ignore finger touch
         if (e.pointerType === 'touch') return;
-        if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawing) return;
+        if (isBlockDrawingRef.current) return;
+
+        // 1. Target pad draw update directly
+        if (isDrawingRef.current && !isLineSnappedRef.current) {
+            const pad = canvasRef.current?.getSignaturePad();
+            if (pad) {
+                pad._strokeUpdate({ clientX: e.clientX, clientY: e.clientY });
+            }
+        }
+
+        // 2. Update hold snap detection
+        if (!isDrawingRef.current || isLineSnappedRef.current || activeTool === 'eraser') return;
         if (!holdStateRef.current || !containerRef.current) return;
 
         const rect = containerRef.current.getBoundingClientRect();
@@ -430,7 +418,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         const dy = currentY - holdStateRef.current.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // If moved more than 20px radius, user is still deliberately gesturing.
         if (dist > 20) {
             holdStateRef.current = { x: currentX, y: currentY };
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
@@ -442,9 +429,29 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
-    const handlePointerUp = () => {
-        // This is now only called by the local pointer events on the div, not used.
-        // All cleanup happens in the global window listener above.
+    const handlePointerUp = (e) => {
+        if (e.pointerType === 'touch') return;
+
+        if (isBlockDrawingRef.current) {
+            setIsBlockDrawing(false);
+            isBlockDrawingRef.current = false;
+            // Pad is already 'off' and Native event was replaced, so we just return.
+            return;
+        }
+
+        try { e.target.releasePointerCapture(e.pointerId); } catch (err) { }
+
+        // Complete stroke cleanly
+        if (isDrawingRef.current && !isLineSnappedRef.current) {
+            const pad = canvasRef.current?.getSignaturePad();
+            if (pad) {
+                pad._strokeEnd({ clientX: e.clientX, clientY: e.clientY });
+            }
+        }
+
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        isDrawingRef.current = false;
+        holdStateRef.current = null;
     };
 
 
