@@ -335,72 +335,82 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
+    const logicRef = useRef({});
+
+    useEffect(() => {
+        logicRef.current = {
+            snapToStraightLine: () => {
+                if (!isDrawingRef.current || isLineSnappedRef.current) return;
+                if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+
+                const pad = canvasRef.current._signaturePad;
+                const rawData = pad._data;
+                if (!rawData || rawData.length === 0) return;
+
+                const currentStroke = rawData[rawData.length - 1]; // Array of points
+                if (!currentStroke || currentStroke.length < 2) return; // Allow 2 point strokes
+
+                const start = currentStroke[0];
+                const end = currentStroke[currentStroke.length - 1];
+
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance > 10) {
+                    isLineSnappedRef.current = true;
+
+                    const straightPoints = [];
+                    const steps = Math.max(10, Math.floor(distance / 5));
+                    const timeStep = Math.max(10, (end.time - start.time) / steps);
+
+                    for (let i = 0; i <= steps; i++) {
+                        const t = i / steps;
+                        straightPoints.push({
+                            x: start.x + dx * t,
+                            y: start.y + dy * t,
+                            time: start.time + (timeStep * i),
+                            color: currentStroke[0]?.color || penColor,
+                        });
+                    }
+
+                    // Stop internal drawing smoothly without firing the user-facing onEnd
+                    const origOnEnd = pad.onEnd;
+                    pad.onEnd = null;
+                    pad._strokeEnd(new Event('mouseup'));
+                    pad.onEnd = origOnEnd;
+
+                    const newStroke = {
+                        points: straightPoints,
+                        penColor: currentStroke[0]?.color || penColor,
+                        minWidth,
+                        maxWidth,
+                        velocityFilterWeight
+                    };
+
+                    cachedStrokesRef.current.push(newStroke);
+
+                    pad.off();
+                    isBlockDrawingRef.current = true;
+                    setIsBlockDrawing(true);
+
+                    redrawCustomStrokes();
+
+                    // Explicitly call the save since we bypassed normal end hooks
+                    handleEndStrokeNative();
+                }
+            }
+        };
+    });
+
     const startHoldTimer = () => {
         if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
         // Transform to straight line if held for 500ms securely
-        holdTimerRef.current = setTimeout(snapToStraightLine, 500);
-    };
-
-    const snapToStraightLine = () => {
-        if (!isDrawingRef.current || isLineSnappedRef.current) return;
-        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-
-        const pad = canvasRef.current._signaturePad;
-        const rawData = pad._data;
-        if (!rawData || rawData.length === 0) return;
-
-        const currentStroke = rawData[rawData.length - 1]; // Array of points
-        if (!currentStroke || currentStroke.length < 3) return;
-
-        const start = currentStroke[0];
-        const end = currentStroke[currentStroke.length - 1];
-
-        const dx = end.x - start.x;
-        const dy = end.y - start.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance > 10) {
-            isLineSnappedRef.current = true;
-
-            const straightPoints = [];
-            const steps = Math.max(10, Math.floor(distance / 5));
-            const timeStep = Math.max(10, (end.time - start.time) / steps);
-
-            for (let i = 0; i <= steps; i++) {
-                const t = i / steps;
-                straightPoints.push({
-                    x: start.x + dx * t,
-                    y: start.y + dy * t,
-                    time: start.time + (timeStep * i),
-                    color: currentStroke[0]?.color || penColor,
-                });
+        holdTimerRef.current = setTimeout(() => {
+            if (logicRef.current.snapToStraightLine) {
+                logicRef.current.snapToStraightLine();
             }
-
-            // Stop internal drawing smoothly without firing the user-facing onEnd
-            const origOnEnd = pad.onEnd;
-            pad.onEnd = null;
-            pad._strokeEnd(new Event('mouseup'));
-            pad.onEnd = origOnEnd;
-
-            const newStroke = {
-                points: straightPoints,
-                penColor: currentStroke[0]?.color || penColor,
-                minWidth,
-                maxWidth,
-                velocityFilterWeight
-            };
-
-            cachedStrokesRef.current.push(newStroke);
-
-            pad.off();
-            isBlockDrawingRef.current = true;
-            setIsBlockDrawing(true);
-
-            redrawCustomStrokes();
-
-            // Explicitly call the save since we bypassed normal end hooks
-            handleEndStrokeNative();
-        }
+        }, 500);
     };
 
 
