@@ -51,7 +51,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, []);
 
     // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
-    const holdStateRef = useRef({ lastX: 0, lastY: 0 });
+    const lastPointCountRef = useRef(0);
 
     useEffect(() => {
         if (!canvasRef.current || !canvasRef.current._signaturePad) return;
@@ -66,8 +66,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         pad._strokeBegin = function (event) {
             isDrawingRef.current = true;
             isLineSnappedRef.current = false;
+            lastPointCountRef.current = 0;
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-            holdStateRef.current = { lastX: 0, lastY: 0 };
 
             // Execute original
             originalBegin.call(this, event);
@@ -89,24 +89,13 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             const currentStroke = rawData[rawData.length - 1]; // In v2 this is an array of points!
             if (!currentStroke || currentStroke.length === 0) return;
 
-            const latestPoint = currentStroke[currentStroke.length - 1];
+            // Signature pad internally filters out micro-jitters (minDistance). 
+            // If the array grew, it means the user made a deliberate movement.
+            // If it didn't grow, the user is holding the pen still!
+            if (currentStroke.length > lastPointCountRef.current) {
+                lastPointCountRef.current = currentStroke.length;
 
-            // If we just started, initialize the hold center
-            if (holdStateRef.current.lastX === 0 && holdStateRef.current.lastY === 0) {
-                holdStateRef.current = { lastX: latestPoint.x, lastY: latestPoint.y };
-            }
-
-            // Check distance from hold center
-            const dx = latestPoint.x - holdStateRef.current.lastX;
-            const dy = latestPoint.y - holdStateRef.current.lastY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            // 20 pixels threshold to allow for hand tremors on high DPI iPad screens
-            // Previous 40px was too loose and caused strokes to falsely snap early
-            if (dist > 20) {
-                // Pen moved significantly, reset the hold center and start a fresh timer
-                holdStateRef.current = { lastX: latestPoint.x, lastY: latestPoint.y };
-                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                // Movement detected! Reset the hold timer.
                 startHoldTimer();
             }
         };
@@ -337,8 +326,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
     const startHoldTimer = () => {
         if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        // Transform to straight line if held for 600ms
-        holdTimerRef.current = setTimeout(snapToStraightLine, 600);
+        // Transform to straight line if held for 500ms securely
+        holdTimerRef.current = setTimeout(snapToStraightLine, 500);
     };
 
     const snapToStraightLine = () => {
