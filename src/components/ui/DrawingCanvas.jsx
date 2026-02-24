@@ -97,8 +97,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             const dy = latestPoint.y - holdStateRef.current.lastY;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            // 40 pixels threshold to allow for hand tremors on high DPI iPad screens
-            if (dist > 40) {
+            // 20 pixels threshold to allow for hand tremors on high DPI iPad screens
+            // Previous 40px was too loose and caused strokes to falsely snap early
+            if (dist > 20) {
                 // Pen moved significantly, reset the hold center and start a fresh timer
                 holdStateRef.current = { lastX: latestPoint.x, lastY: latestPoint.y };
                 if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
@@ -280,8 +281,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         const dy = end.y - start.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Need at least 40 units to form a meaningful line
-        if (distance > 40) {
+        // Need at least 20 units to form a meaningful line
+        if (distance > 20) {
             isLineSnappedRef.current = true;
 
             // Generate straight line points
@@ -299,18 +300,27 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 });
             }
 
-            // Create pristine stroke replacing original data points
-            const newStroke = {
-                ...currentStroke,
-                points: straightPoints
-            };
-
             // Stop internal drawing smoothly without firing the user-facing onEnd
             pad._strokeEnd(new Event('mouseup'));
 
             // Fetch clean data array without the noisy trace
-            const history = pad.toData();
-            history.pop();
+            const history = pad.toData() || [];
+
+            // Create pristine stroke replacing original data points
+            // Crucial: We must explicitly preserve the stroke's original visual weight so that
+            // pad.fromData() doesn't accidentally restyle it using the globally active tool
+            const newStroke = {
+                minWidth: currentStroke.minWidth || minWidth,
+                maxWidth: currentStroke.maxWidth || maxWidth,
+                penColor: currentStroke.penColor || currentStroke.points[0]?.color || penColor,
+                velocityFilterWeight: currentStroke.velocityFilterWeight || velocityFilterWeight,
+                points: straightPoints
+            };
+
+            // Replace the last squiggly stroke with the pristine straight line stroke
+            if (history.length > 0) {
+                history.pop();
+            }
             history.push(newStroke);
 
             // Detach pad events temporarily to avoid glitching during replacement
