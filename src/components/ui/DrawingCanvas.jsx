@@ -418,7 +418,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                         display: 'block',
                         width: '100%',
                         height: '100%',
-                        touchAction: 'none',
+                        // Allow browser to handle finger scroll + pinch-zoom natively.
+                        // Our pointer handlers already reject touch (finger) events,
+                        // so the stylus still draws correctly while fingers can scroll freely.
+                        touchAction: isDrawingMode ? 'pan-x pan-y pinch-zoom' : 'auto',
                         cursor: getCursorStyle(),
                         WebkitTouchCallout: 'none',
                         WebkitUserSelect: 'none',
