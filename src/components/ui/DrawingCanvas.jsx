@@ -228,6 +228,12 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (!isDrawingMode) return;
         if (isBlockedRef.current) return;
 
+        // Lock touchAction to 'none' while stylus is drawing so the browser
+        // cannot intercept long drags as scroll gestures (this is the key fix
+        // for "can't do long strokes after zoom" on Android).
+        const canvasEl = canvasRef.current;
+        if (canvasEl) canvasEl.style.touchAction = 'none';
+
         // Cache rect for this stroke
         canvasRectRef.current = canvasRef.current.getBoundingClientRect();
         smoothedPtRef.current = null;
@@ -286,6 +292,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
+
+            // Restore pan/zoom for fingers when stylus is no longer active
+            if (canvasEl) canvasEl.style.touchAction = isDrawingMode ? 'pan-x pan-y pinch-zoom' : 'auto';
 
             if (ev.pointerType === 'touch') return;
             if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
