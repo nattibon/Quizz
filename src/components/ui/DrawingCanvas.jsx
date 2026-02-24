@@ -40,8 +40,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 isBlockDrawingRef.current = false;
                 // Small delay to ensure touch events are completely flushed before re-enabling
                 setTimeout(() => {
-                    if (canvasRef.current && canvasRef.current._signaturePad) {
-                        canvasRef.current._signaturePad.on();
+                    if (canvasRef.current) {
+                        canvasRef.current.on(); // react-signature-canvas public API
                     }
                 }, 50);
             }
@@ -274,14 +274,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     useEffect(() => {
         logicRef.current = {
             snapToStraightLine: () => {
-                                if (!isDrawingRef.current || isLineSnappedRef.current) return;
+                if (!isDrawingRef.current || isLineSnappedRef.current) return;
                 const pad = canvasRef.current ? canvasRef.current.getSignaturePad() : null;
                 if (!pad) {
-                                        return;
+                    return;
                 }
 
                 const rawData = pad._data;
-                                if (!rawData || rawData.length === 0) return;
+                if (!rawData || rawData.length === 0) return;
 
                 const currentStroke = rawData[rawData.length - 1]; // Array of points
                 if (!currentStroke || currentStroke.length < 2) return; // Allow 2 point strokes
@@ -292,11 +292,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 const dx = end.x - start.x;
                 const dy = end.y - start.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
-                
+
                 if (distance > 10) {
                     isLineSnappedRef.current = true;
 
-                    
+
                     const straightPoints = [];
                     const steps = Math.max(10, Math.floor(distance / 5));
                     const timeStep = Math.max(10, (end.time - start.time) / steps);
@@ -333,7 +333,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     canvasRef.current.clear();
                     redrawCustomStrokes();
 
-                    
+
                     // Save
                     if (!canvasRef.current.isEmpty()) {
                         onSave(canvasRef.current.toDataURL('image/png'));
@@ -347,7 +347,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const holdStateRef = useRef(null);
 
     const handlePointerDown = (e) => {
-                if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
+        if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
 
         isDrawingRef.current = true;
         isLineSnappedRef.current = false;
@@ -361,9 +361,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             };
         }
 
-                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
         holdTimerRef.current = setTimeout(() => {
-                        if (logicRef.current.snapToStraightLine) {
+            if (logicRef.current.snapToStraightLine) {
                 logicRef.current.snapToStraightLine();
             }
         }, 500);
@@ -383,10 +383,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // If moved more than 20px radius, user is still deliberately gesturing.
         if (dist > 20) {
-                        holdStateRef.current = { x: currentX, y: currentY };
+            holdStateRef.current = { x: currentX, y: currentY };
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
             holdTimerRef.current = setTimeout(() => {
-                                if (logicRef.current.snapToStraightLine) {
+                if (logicRef.current.snapToStraightLine) {
                     logicRef.current.snapToStraightLine();
                 }
             }, 500);
@@ -396,7 +396,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const handlePointerUp = () => {
         // This is now only called by the local pointer events on the div, not used.
         // All cleanup happens in the global window listener above.
-            };
+    };
 
 
     return (
