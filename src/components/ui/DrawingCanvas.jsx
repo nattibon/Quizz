@@ -58,6 +58,37 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     }, []);
 
+    // Monkey-patch signature_pad touch handlers to reject finger touches (only allow Apple Pencil / Stylus)
+    useEffect(() => {
+        if (!canvasRef.current) return;
+        const pad = canvasRef.current.getSignaturePad();
+        if (!pad) return;
+
+        const origTouchStart = pad._handleTouchStart;
+        const origTouchMove = pad._handleTouchMove;
+
+        pad._handleTouchStart = function (event) {
+            const touch = event.changedTouches && event.changedTouches[0];
+            // touchType is iOS Safari-specific: 'stylus' = Apple Pencil, 'direct' = finger
+            // If touchType is undefined (non-iOS), reject all touch (PointerEvent handles it)
+            if (!touch || touch.touchType !== 'stylus') return;
+            origTouchStart.call(this, event);
+        };
+
+        pad._handleTouchMove = function (event) {
+            const touch = event.targetTouches && event.targetTouches[0];
+            if (!touch || touch.touchType !== 'stylus') return;
+            origTouchMove.call(this, event);
+        };
+
+        return () => {
+            if (pad) {
+                pad._handleTouchStart = origTouchStart;
+                pad._handleTouchMove = origTouchMove;
+            }
+        };
+    }, []);
+
     // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
     // Cleaned up monkey patch logic. Using manual native pointer events now!
 
@@ -347,6 +378,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const holdStateRef = useRef(null);
 
     const handlePointerDown = (e) => {
+        // Only allow pen (Apple Pencil / Stylus) or mouse. Reject finger touch.
+        if (e.pointerType === 'touch') return;
         if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
 
         isDrawingRef.current = true;
@@ -370,6 +403,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     };
 
     const handlePointerMove = (e) => {
+        // Only track pen/mouse, ignore finger touch
+        if (e.pointerType === 'touch') return;
         if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawing) return;
         if (!holdStateRef.current || !containerRef.current) return;
 
