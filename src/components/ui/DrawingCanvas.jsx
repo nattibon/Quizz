@@ -58,29 +58,26 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     }, []);
 
-    // Block finger touch at the canvas level using capture-phase events.
-    // This fires BEFORE signature_pad's own touchstart/touchmove handlers, allowing us to
-    // call stopImmediatePropagation() and prevent drawing from finger touches.
-    // Apple Pencil on iOS fires touchType === 'stylus' and is allowed through.
-    // Android stylus fires as PointerEvent (pointerType === 'pen') which we already allow.
+    // Block finger touch at the canvas level using capture-phase on touchstart only.
+    // Blocking touchstart prevents stroke initiation. touchmove is left alone so
+    // signature_pad can still call preventDefault() to block page scroll during stylus strokes.
     useEffect(() => {
         const canvas = canvasRef.current?.getCanvas();
         if (!canvas) return;
 
-        const blockFingerTouch = (event) => {
-            const touch = event.changedTouches?.[0] || event.targetTouches?.[0];
-            // Allow Apple Pencil on iOS (touchType === 'stylus')
+        const blockFingerTouchStart = (event) => {
+            const touch = event.changedTouches?.[0];
+            // Allow Apple Pencil on iOS Safari (touchType === 'stylus')
             if (touch?.touchType === 'stylus') return;
-            // Block everything else (finger on iOS, finger on Android, etc.)
+            // Block finger: prevent default (no scroll) and stop signature_pad from drawing
+            event.preventDefault();
             event.stopImmediatePropagation();
         };
 
-        canvas.addEventListener('touchstart', blockFingerTouch, { capture: true });
-        canvas.addEventListener('touchmove', blockFingerTouch, { capture: true });
+        canvas.addEventListener('touchstart', blockFingerTouchStart, { capture: true, passive: false });
 
         return () => {
-            canvas.removeEventListener('touchstart', blockFingerTouch, { capture: true });
-            canvas.removeEventListener('touchmove', blockFingerTouch, { capture: true });
+            canvas.removeEventListener('touchstart', blockFingerTouchStart, { capture: true });
         };
     }, []);
 
