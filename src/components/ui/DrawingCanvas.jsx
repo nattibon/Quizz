@@ -29,6 +29,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const isSnappedRef = useRef(false);
     const holdTimerRef = useRef(null);
     const holdOriginRef = useRef(null);
+    const canvasRectRef = useRef(null);   // cached rect to avoid reflows during drawing
 
     // block-drawing after snap until pointer up
     const isBlockedRef = useRef(false);
@@ -205,10 +206,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, [onSave]);
 
     // ── Pointer events ────────────────────────────────────
+    // Cache the canvas rect once on pointer-down to avoid per-frame reflows in move handler
     const getCanvasPoint = (e) => {
-        const canvas = canvasRef.current;
-        const rect = canvas.getBoundingClientRect();
-        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const r = canvasRectRef.current ?? canvasRef.current.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
 
     const handlePointerDown = (e) => {
@@ -217,6 +218,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (isBlockedRef.current) return;
 
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { }
+
+        // Cache rect NOW so handlePointerMove never forces a reflow during drawing
+        canvasRectRef.current = canvasRef.current.getBoundingClientRect();
 
         toolStyleRef.current = getToolStyle();
         isDrawingRef.current = true;
@@ -238,11 +242,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // Use coalesced events for full hardware resolution
         const rawEvents = (e.nativeEvent?.getCoalescedEvents?.() ?? [e.nativeEvent ?? e]);
+        const r = canvasRectRef.current;  // use cached rect – zero reflows
         for (const re of rawEvents) {
-            const pt = {
-                x: re.clientX - canvasRef.current.getBoundingClientRect().left,
-                y: re.clientY - canvasRef.current.getBoundingClientRect().top
-            };
+            const pt = { x: re.clientX - r.left, y: re.clientY - r.top };
             drawLivePoint(pt, currentStrokeRef.current, toolStyleRef.current);
         }
 
