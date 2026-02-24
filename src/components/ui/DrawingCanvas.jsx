@@ -245,7 +245,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // Use coalesced events for full hardware resolution
         const rawEvents = (e.nativeEvent?.getCoalescedEvents?.() ?? [e.nativeEvent ?? e]);
-        const r = canvasRectRef.current;  // use cached rect – zero reflows
+        // Refresh rect once per frame (not once per session) so zoom changes don't break coordinates
+        canvasRectRef.current = canvasRef.current.getBoundingClientRect();
+        const r = canvasRectRef.current;
         // Exponential Moving Average smoothing (alpha=0.35: lower = smoother, higher = more responsive)
         const ALPHA = 0.35;
         for (const re of rawEvents) {
