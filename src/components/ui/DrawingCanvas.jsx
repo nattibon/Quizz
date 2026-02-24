@@ -30,6 +30,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const holdTimerRef = useRef(null);
     const holdOriginRef = useRef(null);
     const canvasRectRef = useRef(null);   // cached rect to avoid reflows during drawing
+    const smoothedPtRef = useRef(null);   // last smoothed point for EMA input filter
 
     // block-drawing after snap until pointer up
     const isBlockedRef = useRef(false);
@@ -221,6 +222,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // Cache rect NOW so handlePointerMove never forces a reflow during drawing
         canvasRectRef.current = canvasRef.current.getBoundingClientRect();
+        // Reset EMA smoother for fresh stroke
+        smoothedPtRef.current = null;
 
         toolStyleRef.current = getToolStyle();
         isDrawingRef.current = true;
@@ -243,9 +246,20 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         // Use coalesced events for full hardware resolution
         const rawEvents = (e.nativeEvent?.getCoalescedEvents?.() ?? [e.nativeEvent ?? e]);
         const r = canvasRectRef.current;  // use cached rect – zero reflows
+        // Exponential Moving Average smoothing (alpha=0.35: lower = smoother, higher = more responsive)
+        const ALPHA = 0.35;
         for (const re of rawEvents) {
-            const pt = { x: re.clientX - r.left, y: re.clientY - r.top };
-            drawLivePoint(pt, currentStrokeRef.current, toolStyleRef.current);
+            const raw = { x: re.clientX - r.left, y: re.clientY - r.top };
+            // Lerp toward the raw point – kills jitter while keeping the curve feeling natural
+            if (!smoothedPtRef.current) {
+                smoothedPtRef.current = raw;
+            } else {
+                smoothedPtRef.current = {
+                    x: smoothedPtRef.current.x + ALPHA * (raw.x - smoothedPtRef.current.x),
+                    y: smoothedPtRef.current.y + ALPHA * (raw.y - smoothedPtRef.current.y),
+                };
+            }
+            drawLivePoint({ ...smoothedPtRef.current }, currentStrokeRef.current, toolStyleRef.current);
         }
 
         // Reset hold-timer if stylus moves significantly
