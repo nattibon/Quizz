@@ -20,6 +20,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     const [isBlockDrawing, setIsBlockDrawing] = useState(false);
     const [lineSnapEnabled, setLineSnapEnabled] = useState(true);
 
+    // Custom internal caching due to signature_pad v2 dropping line widths from stroke exports
+    const cachedStrokesRef = useRef([]);
+    const bgImageRef = useRef(null);
+
     // Global listener to release the UI block when user lifts pen after snapping
     useEffect(() => {
         const handleGlobalUp = () => {
@@ -82,10 +86,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             // Extract the active stroke array that was just updated
             const rawData = this._data;
             if (!rawData || rawData.length === 0) return;
-            const currentStroke = rawData[rawData.length - 1];
-            if (!currentStroke || !currentStroke.points || currentStroke.points.length === 0) return;
+            const currentStroke = rawData[rawData.length - 1]; // In v2 this is an array of points!
+            if (!currentStroke || currentStroke.length === 0) return;
 
-            const latestPoint = currentStroke.points[currentStroke.points.length - 1];
+            const latestPoint = currentStroke[currentStroke.length - 1];
 
             // If we just started, initialize the hold center
             if (holdStateRef.current.lastX === 0 && holdStateRef.current.lastY === 0) {
@@ -162,8 +166,60 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     } else if (activeTool === 'eraser') {
         penColor = '#ffffff'; // Draw over with white background
         minWidth = 16;
+        minWidth = 16;
         maxWidth = 24;
     }
+
+    // Master renderer to reconstruct canvas cleanly keeping diverse tools styles
+    const redrawCustomStrokes = () => {
+        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+        const pad = canvasRef.current._signaturePad;
+
+        pad.clear();
+
+        if (bgImageRef.current) {
+            const ctx = pad._ctx;
+            const canvas = pad._canvas;
+            // Get ratio from window
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            const width = canvas.width / ratio;
+            const height = canvas.height / ratio;
+            ctx.drawImage(bgImageRef.current, 0, 0, width, height);
+            pad._isEmpty = false;
+        }
+
+        const strokes = cachedStrokesRef.current;
+        if (strokes.length === 0) return;
+
+        const oldColor = pad.penColor;
+        const oldMin = pad.minWidth;
+        const oldMax = pad.maxWidth;
+        const oldVelocity = pad.velocityFilterWeight;
+
+        const originalData = [];
+
+        strokes.forEach(stroke => {
+            pad.penColor = stroke.penColor;
+            pad.minWidth = stroke.minWidth;
+            pad.maxWidth = stroke.maxWidth;
+            pad.velocityFilterWeight = stroke.velocityFilterWeight;
+
+            pad._fromData(
+                [stroke.points],
+                (curve, widths) => pad._drawCurve(curve, widths.start, widths.end),
+                (rawPoint) => pad._drawDot(rawPoint)
+            );
+            originalData.push(stroke.points);
+        });
+
+        pad._data = originalData;
+
+        // Restore active tools
+        pad.penColor = oldColor;
+        pad.minWidth = oldMin;
+        pad.maxWidth = oldMax;
+        pad.velocityFilterWeight = oldVelocity;
+    };
 
     // Initial Resize and Window Resize listener
     useEffect(() => {
@@ -187,10 +243,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     canvasRef.current._signaturePad.clear();
                 }
 
-                // Restore drawing smoothly
-                if (data && data.length > 0) {
-                    canvasRef.current.fromData(data);
-                }
+                // Restore drawing cleanly from our diverse styles cache
+                redrawCustomStrokes();
             }
         };
 
@@ -217,15 +271,21 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     // Load initial data if provided
     useEffect(() => {
         if (initialDataUrl && canvasRef.current) {
-            // Need a slight delay to ensure canvas is properly sized before loading data
-            setTimeout(() => {
-                canvasRef.current.fromDataURL(initialDataUrl);
-                setIsEmpty(false);
-            }, 150);
+            const img = new Image();
+            img.onload = () => {
+                bgImageRef.current = img;
+                if (canvasRef.current) {
+                    canvasRef.current.fromDataURL(initialDataUrl);
+                    setIsEmpty(false);
+                }
+            };
+            img.src = initialDataUrl;
         }
     }, [initialDataUrl]);
 
     const handleClear = () => {
+        cachedStrokesRef.current = [];
+        bgImageRef.current = null;
         if (canvasRef.current) canvasRef.current.clear();
         setIsEmpty(true);
         onSave(''); // Clear saved data
@@ -234,21 +294,39 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
     const handleUndo = () => {
         if (!canvasRef.current) return;
-        const data = canvasRef.current.toData();
-        if (data && data.length > 0) {
-            data.pop(); // remove last stroke
-            canvasRef.current.fromData(data);
-            if (data.length === 0) {
+
+        if (cachedStrokesRef.current.length > 0) {
+            cachedStrokesRef.current.pop(); // remove last stroke
+            redrawCustomStrokes();
+
+            if (cachedStrokesRef.current.length === 0 && !bgImageRef.current) {
                 setIsEmpty(true);
                 onSave('');
             } else {
                 onSave(canvasRef.current.toDataURL('image/png'));
             }
+        } else if (bgImageRef.current) {
+            // Let them wipe the background if strokes are empty
+            handleClear();
         }
     };
 
     const handleEndStrokeNative = () => {
-        // Only saving here, internal tracking is handled by monkey-patch
+        if (!isLineSnappedRef.current && canvasRef.current && canvasRef.current._signaturePad) {
+            const pad = canvasRef.current._signaturePad;
+            const rawData = pad._data;
+            if (rawData && rawData.length > 0) {
+                const currentPoints = rawData[rawData.length - 1]; // Array of points
+                cachedStrokesRef.current.push({
+                    points: [...currentPoints],
+                    penColor,
+                    minWidth,
+                    maxWidth,
+                    velocityFilterWeight
+                });
+            }
+        }
+
         setIsEmpty(canvasRef.current.isEmpty());
         if (!canvasRef.current.isEmpty()) {
             onSave(canvasRef.current.toDataURL('image/png'));
@@ -271,21 +349,19 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         const rawData = pad._data;
         if (!rawData || rawData.length === 0) return;
 
-        const currentStroke = rawData[rawData.length - 1];
-        if (!currentStroke || !currentStroke.points || currentStroke.points.length < 3) return;
+        const currentStroke = rawData[rawData.length - 1]; // Array of points
+        if (!currentStroke || currentStroke.length < 3) return;
 
-        const start = currentStroke.points[0];
-        const end = currentStroke.points[currentStroke.points.length - 1];
+        const start = currentStroke[0];
+        const end = currentStroke[currentStroke.length - 1];
 
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Need at least 20 units to form a meaningful line
         if (distance > 20) {
             isLineSnappedRef.current = true;
 
-            // Generate straight line points
             const straightPoints = [];
             const steps = Math.max(10, Math.floor(distance / 5));
             const timeStep = Math.max(10, (end.time - start.time) / steps);
@@ -296,40 +372,31 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     x: start.x + dx * t,
                     y: start.y + dy * t,
                     time: start.time + (timeStep * i),
-                    color: currentStroke.points[0]?.color || penColor,
+                    color: currentStroke[0]?.color || penColor,
                 });
             }
 
             // Stop internal drawing smoothly without firing the user-facing onEnd
+            const origOnEnd = pad.onEnd;
+            pad.onEnd = null;
             pad._strokeEnd(new Event('mouseup'));
+            pad.onEnd = origOnEnd;
 
-            // Fetch clean data array without the noisy trace
-            const history = pad.toData() || [];
-
-            // Create pristine stroke replacing original data points
-            // Crucial: We must explicitly preserve the stroke's original visual weight so that
-            // pad.fromData() doesn't accidentally restyle it using the globally active tool
             const newStroke = {
-                minWidth: currentStroke.minWidth || minWidth,
-                maxWidth: currentStroke.maxWidth || maxWidth,
-                penColor: currentStroke.penColor || currentStroke.points[0]?.color || penColor,
-                velocityFilterWeight: currentStroke.velocityFilterWeight || velocityFilterWeight,
-                points: straightPoints
+                points: straightPoints,
+                penColor: currentStroke[0]?.color || penColor,
+                minWidth,
+                maxWidth,
+                velocityFilterWeight
             };
 
-            // Replace the last squiggly stroke with the pristine straight line stroke
-            if (history.length > 0) {
-                history.pop();
-            }
-            history.push(newStroke);
+            cachedStrokesRef.current.push(newStroke);
 
-            // Detach pad events temporarily to avoid glitching during replacement
             pad.off();
             isBlockDrawingRef.current = true;
             setIsBlockDrawing(true);
 
-            // Draw clean line
-            pad.fromData(history);
+            redrawCustomStrokes();
 
             // Explicitly call the save since we bypassed normal end hooks
             handleEndStrokeNative();
