@@ -46,6 +46,86 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     }, []);
 
+    // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
+    const holdStateRef = useRef({ lastX: 0, lastY: 0 });
+
+    useEffect(() => {
+        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+        const pad = canvasRef.current._signaturePad;
+
+        // Save original methods
+        const originalBegin = pad._strokeBegin;
+        const originalUpdate = pad._strokeUpdate;
+        const originalEnd = pad._strokeEnd;
+
+        // Patch Begin
+        pad._strokeBegin = function (event) {
+            isDrawingRef.current = true;
+            isLineSnappedRef.current = false;
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            holdStateRef.current = { lastX: 0, lastY: 0 };
+
+            // Execute original
+            originalBegin.call(this, event);
+
+            // Start the hold timer immediately for the first point
+            startHoldTimer();
+        };
+
+        // Patch Update
+        pad._strokeUpdate = function (event) {
+            // Execute original
+            originalUpdate.call(this, event);
+
+            if (isLineSnappedRef.current) return;
+
+            // Extract the active stroke array that was just updated
+            const rawData = this._data;
+            if (!rawData || rawData.length === 0) return;
+            const currentStroke = rawData[rawData.length - 1];
+            if (!currentStroke || !currentStroke.points || currentStroke.points.length === 0) return;
+
+            const latestPoint = currentStroke.points[currentStroke.points.length - 1];
+
+            // If we just started, initialize the hold center
+            if (holdStateRef.current.lastX === 0 && holdStateRef.current.lastY === 0) {
+                holdStateRef.current = { lastX: latestPoint.x, lastY: latestPoint.y };
+            }
+
+            // Check distance from hold center
+            const dx = latestPoint.x - holdStateRef.current.lastX;
+            const dy = latestPoint.y - holdStateRef.current.lastY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 40 pixels threshold to allow for hand tremors on high DPI iPad screens
+            if (dist > 40) {
+                // Pen moved significantly, reset the hold center and start a fresh timer
+                holdStateRef.current = { lastX: latestPoint.x, lastY: latestPoint.y };
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                startHoldTimer();
+            }
+        };
+
+        // Patch End
+        pad._strokeEnd = function (event) {
+            // Cancel timer
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            isDrawingRef.current = false;
+
+            // Execute original
+            originalEnd.call(this, event);
+        };
+
+        return () => {
+            // Clean up monkey patches on unmount
+            if (pad) {
+                pad._strokeBegin = originalBegin;
+                pad._strokeUpdate = originalUpdate;
+                pad._strokeEnd = originalEnd;
+            }
+        };
+    }, []);
+
     const colors = [
         { name: 'ดำ (Black)', value: '#0f172a', bgClass: 'bg-slate-900' },
         { name: 'น้ำเงิน (Blue)', value: '#2563eb', bgClass: 'bg-blue-600' },
@@ -166,14 +246,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
-    // Track continuous hold states without relying on DOM events
-    const holdIntervalRef = useRef(null);
     const handleEndStrokeNative = () => {
-        isDrawingRef.current = false;
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-
+        // Only saving here, internal tracking is handled by monkey-patch
         setIsEmpty(canvasRef.current.isEmpty());
-        // Auto-save on every stroke finish
         if (!canvasRef.current.isEmpty()) {
             onSave(canvasRef.current.toDataURL('image/png'));
         } else {
@@ -181,93 +256,35 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         }
     };
 
-    const handlePointerDown = (e) => {
-        if (isBlockDrawingRef.current) return;
-        if (!containerRef.current) return;
-
-        const rect = containerRef.current.getBoundingClientRect();
-
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-
-        if (clientX === undefined || clientY === undefined) return;
-
-        const point = { x: clientX - rect.left, y: clientY - rect.top, time: Date.now() };
-        startPointRef.current = point;
-        lastPointRef.current = point;
-
-        isDrawingRef.current = true;
-        isLineSnappedRef.current = false;
-
-        startHoldTimer();
-    };
-
-    const handlePointerMove = (e) => {
-        if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawingRef.current) return;
-
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-
-        if (clientX === undefined || clientY === undefined) return;
-
-        const rect = containerRef.current.getBoundingClientRect();
-        const point = { x: clientX - rect.left, y: clientY - rect.top, time: Date.now() };
-
-        if (!lastPointRef.current) {
-            lastPointRef.current = point;
-            startHoldTimer();
-            return;
-        }
-
-        const dx = point.x - lastPointRef.current.x;
-        const dy = point.y - lastPointRef.current.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > 15) {
-            lastPointRef.current = point;
-            startHoldTimer();
-        }
-    };
-
-    const handlePointerUp = () => {
-        isDrawingRef.current = false;
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-    };
-
     const startHoldTimer = () => {
         if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        // Transform to straight line if held for 600ms
         holdTimerRef.current = setTimeout(snapToStraightLine, 600);
     };
 
     const snapToStraightLine = () => {
         if (!isDrawingRef.current || isLineSnappedRef.current) return;
-        const start = startPointRef.current;
-        const end = lastPointRef.current;
-
-        if (!start || !end) return;
         if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+
+        const pad = canvasRef.current._signaturePad;
+        const rawData = pad._data;
+        if (!rawData || rawData.length === 0) return;
+
+        const currentStroke = rawData[rawData.length - 1];
+        if (!currentStroke || !currentStroke.points || currentStroke.points.length < 3) return;
+
+        const start = currentStroke.points[0];
+        const end = currentStroke.points[currentStroke.points.length - 1];
 
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance > 30) {
+        // Need at least 40 units to form a meaningful line
+        if (distance > 40) {
             isLineSnappedRef.current = true;
 
-            const pad = canvasRef.current._signaturePad;
-
-            // toData() intentionally gets ONLY previously completed strokes 
-            const history = pad.toData() || [];
-
-            // Generate points
+            // Generate straight line points
             const straightPoints = [];
             const steps = Math.max(10, Math.floor(distance / 5));
             const timeStep = Math.max(10, (end.time - start.time) / steps);
@@ -277,30 +294,34 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 straightPoints.push({
                     x: start.x + dx * t,
                     y: start.y + dy * t,
-                    time: start.time + (timeStep * i)
+                    time: start.time + (timeStep * i),
+                    color: currentStroke.points[0]?.color || penColor,
                 });
             }
 
-            // Append our pristine stroke
-            history.push({
-                penColor: penColor,
-                minWidth: minWidth,
-                maxWidth: maxWidth,
-                velocityFilterWeight: velocityFilterWeight,
+            // Create pristine stroke replacing original data points
+            const newStroke = {
+                ...currentStroke,
                 points: straightPoints
-            });
+            };
 
-            // Detach pad's internal events first
+            // Stop internal drawing smoothly without firing the user-facing onEnd
+            pad._strokeEnd(new Event('mouseup'));
+
+            // Fetch clean data array without the noisy trace
+            const history = pad.toData();
+            history.pop();
+            history.push(newStroke);
+
+            // Detach pad events temporarily to avoid glitching during replacement
             pad.off();
-
-            // Block our container from sending pointer events to canvas
             isBlockDrawingRef.current = true;
             setIsBlockDrawing(true);
 
-            // Load history (which clears canvas & draws our straight line, obliterating the uncompleted wobbly trace)
+            // Draw clean line
             pad.fromData(history);
 
-            // Trigger save notification explicitly
+            // Explicitly call the save since we bypassed normal end hooks
             handleEndStrokeNative();
         }
     };
@@ -388,14 +409,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 ref={containerRef}
                 className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full ${isBlockDrawing ? 'pointer-events-none' : ''}`}
                 style={overlayMode ? {} : { height: '500px' }}
-                onPointerDownCapture={handlePointerDown}
-                onPointerMoveCapture={handlePointerMove}
-                onPointerUpCapture={handlePointerUp}
-                onPointerCancelCapture={handlePointerUp}
-                onTouchStartCapture={handlePointerDown}
-                onTouchMoveCapture={handlePointerMove}
-                onTouchEndCapture={handlePointerUp}
-                onTouchCancelCapture={handlePointerUp}
             >
                 <SignatureCanvas
                     ref={canvasRef}
