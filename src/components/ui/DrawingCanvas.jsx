@@ -51,85 +51,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, []);
 
     // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
-    const holdStateRef = useRef(null);
-
-    useEffect(() => {
-        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-        const pad = canvasRef.current._signaturePad;
-
-        // Save original methods
-        const originalBegin = pad._strokeBegin;
-        const originalUpdate = pad._strokeUpdate;
-        const originalEnd = pad._strokeEnd;
-
-        // Patch Begin
-        pad._strokeBegin = function (event) {
-            if (isBlockDrawingRef.current) return;
-
-            isDrawingRef.current = true;
-            isLineSnappedRef.current = false;
-            holdStateRef.current = null;
-            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-
-            // Execute original
-            originalBegin.call(this, event);
-
-            startHoldTimer();
-        };
-
-        // Patch Update
-        pad._strokeUpdate = function (event) {
-            if (isBlockDrawingRef.current || isLineSnappedRef.current) return;
-
-            // Execute original
-            originalUpdate.call(this, event);
-
-            const rawData = this._data;
-            if (!rawData || rawData.length === 0) return;
-            const currentStroke = rawData[rawData.length - 1]; // In v2 this is an array of points!
-            if (!currentStroke || currentStroke.length === 0) return;
-
-            const latestPoint = currentStroke[currentStroke.length - 1];
-
-            // Initialize hold center if first time moving
-            if (!holdStateRef.current) {
-                holdStateRef.current = { x: latestPoint.x, y: latestPoint.y };
-                startHoldTimer();
-                return;
-            }
-
-            const dx = latestPoint.x - holdStateRef.current.x;
-            const dy = latestPoint.y - holdStateRef.current.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            // 15 pixels resting radius threshold for hand tremors on iPad
-            if (dist > 15) {
-                // Pen moved outside resting radius, reset the hold center and start a fresh timer
-                holdStateRef.current = { x: latestPoint.x, y: latestPoint.y };
-                startHoldTimer();
-            }
-        };
-
-        // Patch End
-        pad._strokeEnd = function (event) {
-            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-            isDrawingRef.current = false;
-
-            if (isBlockDrawingRef.current || isLineSnappedRef.current) return;
-
-            // Execute original
-            originalEnd.call(this, event);
-        };
-
-        return () => {
-            // Clean up monkey patches on unmount
-            if (pad) {
-                pad._strokeBegin = originalBegin;
-                pad._strokeUpdate = originalUpdate;
-                pad._strokeEnd = originalEnd;
-            }
-        };
-    }, []);
+    // Cleaned up monkey patch logic. Using manual native pointer events now!
 
     const colors = [
         { name: 'ดำ (Black)', value: '#0f172a', bgClass: 'bg-slate-900' },
@@ -403,14 +325,49 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     });
 
-    const startHoldTimer = () => {
+    const holdStateRef = useRef(null);
+
+    const handlePointerDown = (e) => {
+        if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
+
+        isDrawingRef.current = true;
+        isLineSnappedRef.current = false;
+
+        // Start tracking position manually bypassing signature_pad completely
+        const rect = containerRef.current.getBoundingClientRect();
+        holdStateRef.current = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
+
         if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        // Transform to straight line if held for 500ms securely
-        holdTimerRef.current = setTimeout(() => {
-            if (logicRef.current.snapToStraightLine) {
-                logicRef.current.snapToStraightLine();
-            }
-        }, 500);
+        startHoldTimer();
+    };
+
+    const handlePointerMove = (e) => {
+        if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawing) return;
+        if (!holdStateRef.current) return;
+
+        const rect = containerRef.current.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+
+        const dx = currentX - holdStateRef.current.x;
+        const dy = currentY - holdStateRef.current.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // If moved more than 15px radius, user is still deliberately gesturing.
+        if (dist > 15) {
+            holdStateRef.current = { x: currentX, y: currentY };
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            startHoldTimer();
+        }
+    };
+
+    const handlePointerUp = () => {
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        isDrawingRef.current = false;
+        holdStateRef.current = null;
     };
 
 
@@ -496,6 +453,20 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 ref={containerRef}
                 className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full ${isBlockDrawing ? 'pointer-events-none' : ''}`}
                 style={overlayMode ? {} : { height: '500px' }}
+                onTouchStart={(e) => {
+                    const touch = e.touches[0];
+                    handlePointerDown({ clientX: touch.clientX, clientY: touch.clientY });
+                }}
+                onTouchMove={(e) => {
+                    const touch = e.touches[0];
+                    handlePointerMove({ clientX: touch.clientX, clientY: touch.clientY });
+                }}
+                onTouchEnd={handlePointerUp}
+                onTouchCancel={handlePointerUp}
+                onMouseDown={handlePointerDown}
+                onMouseMove={handlePointerMove}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
             >
                 <SignatureCanvas
                     ref={canvasRef}
