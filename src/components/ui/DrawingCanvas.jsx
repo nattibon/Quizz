@@ -58,34 +58,29 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     }, []);
 
-    // Monkey-patch signature_pad touch handlers to reject finger touches (only allow Apple Pencil / Stylus)
+    // Block finger touch at the canvas level using capture-phase events.
+    // This fires BEFORE signature_pad's own touchstart/touchmove handlers, allowing us to
+    // call stopImmediatePropagation() and prevent drawing from finger touches.
+    // Apple Pencil on iOS fires touchType === 'stylus' and is allowed through.
+    // Android stylus fires as PointerEvent (pointerType === 'pen') which we already allow.
     useEffect(() => {
-        if (!canvasRef.current) return;
-        const pad = canvasRef.current.getSignaturePad();
-        if (!pad) return;
+        const canvas = canvasRef.current?.getCanvas();
+        if (!canvas) return;
 
-        const origTouchStart = pad._handleTouchStart;
-        const origTouchMove = pad._handleTouchMove;
-
-        pad._handleTouchStart = function (event) {
-            const touch = event.changedTouches && event.changedTouches[0];
-            // touchType is iOS Safari-specific: 'stylus' = Apple Pencil, 'direct' = finger
-            // If touchType is undefined (non-iOS), reject all touch (PointerEvent handles it)
-            if (!touch || touch.touchType !== 'stylus') return;
-            origTouchStart.call(this, event);
+        const blockFingerTouch = (event) => {
+            const touch = event.changedTouches?.[0] || event.targetTouches?.[0];
+            // Allow Apple Pencil on iOS (touchType === 'stylus')
+            if (touch?.touchType === 'stylus') return;
+            // Block everything else (finger on iOS, finger on Android, etc.)
+            event.stopImmediatePropagation();
         };
 
-        pad._handleTouchMove = function (event) {
-            const touch = event.targetTouches && event.targetTouches[0];
-            if (!touch || touch.touchType !== 'stylus') return;
-            origTouchMove.call(this, event);
-        };
+        canvas.addEventListener('touchstart', blockFingerTouch, { capture: true });
+        canvas.addEventListener('touchmove', blockFingerTouch, { capture: true });
 
         return () => {
-            if (pad) {
-                pad._handleTouchStart = origTouchStart;
-                pad._handleTouchMove = origTouchMove;
-            }
+            canvas.removeEventListener('touchstart', blockFingerTouch, { capture: true });
+            canvas.removeEventListener('touchmove', blockFingerTouch, { capture: true });
         };
     }, []);
 
