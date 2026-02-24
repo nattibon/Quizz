@@ -228,11 +228,8 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (!isDrawingMode) return;
         if (isBlockedRef.current) return;
 
-        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { }
-
-        // Cache rect NOW so handlePointerMove never forces a reflow during drawing
+        // Cache rect for this stroke
         canvasRectRef.current = canvasRef.current.getBoundingClientRect();
-        // Reset EMA smoother for fresh stroke
         smoothedPtRef.current = null;
 
         toolStyleRef.current = getToolStyle();
@@ -247,73 +244,74 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
             holdTimerRef.current = setTimeout(snapToLine, 500);
         }
-    };
 
-    const handlePointerMove = (e) => {
-        if (e.pointerType === 'touch') return;
-        if (!isDrawingRef.current || isSnappedRef.current || isBlockedRef.current) return;
+        // Attach window-level move/up listeners so long strokes are never lost
+        // (window receives events even when stylus moves off the canvas element)
+        const onMove = (ev) => {
+            if (ev.pointerType === 'touch') return;
+            if (!isDrawingRef.current || isSnappedRef.current || isBlockedRef.current) return;
 
-        // Use coalesced events for full hardware resolution
-        const rawEvents = (e.nativeEvent?.getCoalescedEvents?.() ?? [e.nativeEvent ?? e]);
-        // Refresh rect once per frame (not once per session) so zoom changes don't break coordinates
-        canvasRectRef.current = canvasRef.current.getBoundingClientRect();
-        const r = canvasRectRef.current;
-        // Exponential Moving Average smoothing (alpha=0.35: lower = smoother, higher = more responsive)
-        const ALPHA = 0.35;
-        for (const re of rawEvents) {
-            const raw = toCanvasCoords(re.clientX, re.clientY, r);
-            // Lerp toward the raw point – kills jitter while keeping the curve feeling natural
-            if (!smoothedPtRef.current) {
-                smoothedPtRef.current = raw;
-            } else {
-                smoothedPtRef.current = {
-                    x: smoothedPtRef.current.x + ALPHA * (raw.x - smoothedPtRef.current.x),
-                    y: smoothedPtRef.current.y + ALPHA * (raw.y - smoothedPtRef.current.y),
-                };
+            const rawEvents = (ev.getCoalescedEvents?.() ?? [ev]);
+            // Refresh rect each frame so zoom changes don't break coordinates
+            canvasRectRef.current = canvasRef.current.getBoundingClientRect();
+            const r = canvasRectRef.current;
+            const ALPHA = 0.35;
+            for (const re of rawEvents) {
+                const raw = toCanvasCoords(re.clientX, re.clientY, r);
+                if (!smoothedPtRef.current) {
+                    smoothedPtRef.current = raw;
+                } else {
+                    smoothedPtRef.current = {
+                        x: smoothedPtRef.current.x + ALPHA * (raw.x - smoothedPtRef.current.x),
+                        y: smoothedPtRef.current.y + ALPHA * (raw.y - smoothedPtRef.current.y),
+                    };
+                }
+                drawLivePoint({ ...smoothedPtRef.current }, currentStrokeRef.current, toolStyleRef.current);
             }
-            drawLivePoint({ ...smoothedPtRef.current }, currentStrokeRef.current, toolStyleRef.current);
-        }
 
-        // Reset hold-timer if stylus moves significantly
-        if (activeTool !== 'eraser' && holdOriginRef.current) {
-            const pt = getCanvasPoint(e);
-            const dx = pt.x - holdOriginRef.current.x;
-            const dy = pt.y - holdOriginRef.current.y;
-            if (Math.sqrt(dx * dx + dy * dy) > 20) {
-                holdOriginRef.current = pt;
-                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-                holdTimerRef.current = setTimeout(snapToLine, 500);
+            // Reset hold-timer if stylus moves significantly
+            if (activeTool !== 'eraser' && holdOriginRef.current) {
+                const pt2 = toCanvasCoords(ev.clientX, ev.clientY, canvasRectRef.current);
+                const dx = pt2.x - holdOriginRef.current.x;
+                const dy = pt2.y - holdOriginRef.current.y;
+                if (Math.sqrt(dx * dx + dy * dy) > 20) {
+                    holdOriginRef.current = pt2;
+                    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                    holdTimerRef.current = setTimeout(snapToLine, 500);
+                }
             }
-        }
-    };
+        };
 
-    const handlePointerUp = (e) => {
-        if (e.pointerType === 'touch') return;
+        const onUp = (ev) => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
 
-        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { }
-        if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+            if (ev.pointerType === 'touch') return;
+            if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
 
-        if (isBlockedRef.current) {
-            isBlockedRef.current = false;
-            setIsBlocked(false);
-            return;
-        }
+            if (isBlockedRef.current) {
+                isBlockedRef.current = false;
+                setIsBlocked(false);
+                return;
+            }
 
-        if (!isDrawingRef.current) return;
-        isDrawingRef.current = false;
+            if (!isDrawingRef.current) return;
+            isDrawingRef.current = false;
 
-        if (isSnappedRef.current) {
-            isSnappedRef.current = false;
-            return;
-        }
+            if (isSnappedRef.current) { isSnappedRef.current = false; return; }
 
-        // Commit stroke
-        const pts = currentStrokeRef.current;
-        if (pts.length > 0) {
-            strokesRef.current.push({ points: pts, style: { ...toolStyleRef.current } });
-            currentStrokeRef.current = [];
-            saveCanvas();
-        }
+            const pts = currentStrokeRef.current;
+            if (pts.length > 0) {
+                strokesRef.current.push({ points: pts, style: { ...toolStyleRef.current } });
+                currentStrokeRef.current = [];
+                saveCanvas();
+            }
+        };
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
     };
 
     // ── Snap to straight line ─────────────────────────────
@@ -436,9 +434,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     } w-full`}
                 style={overlayMode ? {} : { height: '500px' }}
                 onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
             >
                 <canvas
                     ref={canvasRef}
