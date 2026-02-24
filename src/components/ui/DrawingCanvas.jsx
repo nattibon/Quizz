@@ -228,14 +228,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, []);
 
     // ── Pointer events ────────────────────────────────────
-    // On mobile, PointerEvent.clientX/Y are in VISUAL viewport coordinates (post-zoom),
-    // but getBoundingClientRect() is in LAYOUT viewport coordinates (pre-zoom CSS pixels).
-    // After pinch-to-zoom we MUST divide by visualViewport.scale to sync them up.
+    // Calculate precise coordinates relative to the canvas bounding rect
     const toCanvasCoords = (clientX, clientY, rect) => {
-        const scale = window.visualViewport?.scale ?? 1;
         return {
-            x: clientX / scale - rect.left,
-            y: clientY / scale - rect.top,
+            x: clientX - rect.left,
+            y: clientY - rect.top,
         };
     };
 
