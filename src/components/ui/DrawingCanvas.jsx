@@ -123,61 +123,72 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         maxWidth = 24;
     }
 
-    // Master renderer to reconstruct canvas cleanly keeping diverse tools styles
+    // Master renderer to reconstruct canvas cleanly keeping diverse stroke styles
     const redrawCustomStrokes = () => {
         if (!canvasRef.current) return;
         const pad = canvasRef.current.getSignaturePad();
         if (!pad) return;
 
-        pad.clear();
+        const ctx = pad._ctx;
+        const canvas = pad._canvas;
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        const w = canvas.width / ratio;
+        const h = canvas.height / ratio;
+
+        // Clear
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        ctx.fillStyle = pad.backgroundColor || 'rgba(0,0,0,0)';
+        ctx.fillRect(0, 0, w, h);
 
         if (bgImageRef.current) {
-            const ctx = pad._ctx;
-            const canvas = pad._canvas;
-            const ratio = Math.max(window.devicePixelRatio || 1, 1);
-            const width = canvas.width / ratio;
-            const height = canvas.height / ratio;
-            ctx.drawImage(bgImageRef.current, 0, 0, width, height);
-            pad._isEmpty = false;
+            ctx.drawImage(bgImageRef.current, 0, 0, w, h);
         }
 
         const strokes = cachedStrokesRef.current;
-        if (strokes.length === 0) return;
 
-        const ctx = pad._ctx;
-        const oldColor = pad.penColor;
-        const oldMin = pad.minWidth;
-        const oldMax = pad.maxWidth;
-        const oldVelocity = pad.velocityFilterWeight;
-
-        // Draw each stroke independently using the pad's internal render pipeline
-        // but resetting pad state between strokes to prevent point leakage
         strokes.forEach(stroke => {
-            pad.penColor = stroke.penColor;
-            pad.minWidth = stroke.minWidth;
-            pad.maxWidth = stroke.maxWidth;
-            pad.velocityFilterWeight = stroke.velocityFilterWeight;
-            ctx.fillStyle = stroke.penColor;
+            const pts = stroke.points;
+            if (!pts || pts.length === 0) return;
 
-            // Feed ONLY this stroke's points as a single group – _fromData resets 
-            // internal bezier state at j===0, so one-group-per-call is clean.
-            pad._fromData(
-                [stroke.points],
-                (curve, widths) => pad._drawCurve(curve, widths.start, widths.end),
-                (rawPoint) => pad._drawDot(rawPoint)
-            );
+            const lw = (stroke.minWidth + stroke.maxWidth) / 2;
+
+            ctx.beginPath();  // ← guaranteed clean path per stroke
+            ctx.strokeStyle = stroke.penColor;
+            ctx.lineWidth = lw;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+
+            if (pts.length === 1) {
+                // Single tap: draw a filled dot
+                ctx.fillStyle = stroke.penColor;
+                ctx.arc(pts[0].x, pts[0].y, lw / 2, 0, 2 * Math.PI);
+                ctx.fill();
+            } else {
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length - 1; i++) {
+                    // Smooth midpoint curve
+                    const mx = (pts[i].x + pts[i + 1].x) / 2;
+                    const my = (pts[i].y + pts[i + 1].y) / 2;
+                    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+                }
+                // Last segment
+                const last = pts[pts.length - 1];
+                ctx.lineTo(last.x, last.y);
+                ctx.stroke();
+            }
         });
 
-        // Restore _data so signature_pad knows what's on canvas
+        // Keep pad._data in sync so undo/save work correctly
         pad._data = strokes.map(s => s.points);
-        pad._isEmpty = false;
+        pad._isEmpty = strokes.length === 0 && !bgImageRef.current;
 
-        // Restore active tool settings
-        pad.penColor = oldColor;
-        pad.minWidth = oldMin;
-        pad.maxWidth = oldMax;
-        pad.velocityFilterWeight = oldVelocity;
-        ctx.fillStyle = oldColor;
+        // Restore active tool color to pad so next live stroke uses correct color
+        pad.penColor = penColor;
+        ctx.fillStyle = penColor;
+        ctx.strokeStyle = penColor;
     };
 
     // Initial Resize and Window Resize listener
