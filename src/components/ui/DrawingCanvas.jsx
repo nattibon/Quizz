@@ -325,58 +325,59 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         };
     }, []);
 
-    const handleStrokeBegin = () => {
+    const holdStateRef = useRef(null);
+
+    const handlePointerDown = (e) => {
         if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
 
         isDrawingRef.current = true;
         isLineSnappedRef.current = false;
 
-        if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+        // Start tracking position manually capturing DOM events
+        if (containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            holdStateRef.current = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+        }
 
-        let lastPointCount = 0;
-        let steadyCount = 0; // Number of ticks the pen was perfectly still
-
-        // Poll the signature pad every 100ms. 
-        // If the number of points in the stroke hasn't grown for 5 consecutive ticks (500ms), it's a hold!
-        holdTimerRef.current = setInterval(() => {
-            if (isLineSnappedRef.current || isBlockDrawingRef.current) {
-                clearInterval(holdTimerRef.current);
-                return;
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = setTimeout(() => {
+            if (logicRef.current.snapToStraightLine) {
+                logicRef.current.snapToStraightLine();
             }
-
-            if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-            const pad = canvasRef.current._signaturePad;
-            const rawData = pad._data;
-            if (!rawData || rawData.length === 0) return;
-
-            const currentStroke = rawData[rawData.length - 1];
-            if (!currentStroke || currentStroke.length === 0) return;
-
-            const currentPointCount = currentStroke.length;
-
-            if (currentPointCount === lastPointCount) {
-                // Pen hasn't moved enough to register a new point (SignaturePad minDistance filtered it)
-                steadyCount++;
-
-                if (steadyCount >= 5) { // 5 ticks * 100ms = 500ms hold
-                    clearInterval(holdTimerRef.current);
-                    if (logicRef.current.snapToStraightLine) {
-                        logicRef.current.snapToStraightLine();
-                    }
-                }
-            } else {
-                // Pen moved! Reset the steady counter but update the known point count
-                steadyCount = 0;
-                lastPointCount = currentPointCount;
-            }
-        }, 100);
+        }, 500);
     };
 
-    const handleStrokeEnd = () => {
-        if (holdTimerRef.current) clearInterval(holdTimerRef.current);
-        isDrawingRef.current = false;
+    const handlePointerMove = (e) => {
+        if (!isDrawingRef.current || isLineSnappedRef.current || isBlockDrawing) return;
+        if (!holdStateRef.current || !containerRef.current) return;
 
-        handleEndStrokeNative();
+        const rect = containerRef.current.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+
+        const dx = currentX - holdStateRef.current.x;
+        const dy = currentY - holdStateRef.current.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // If moved more than 20px radius, user is still deliberately gesturing.
+        if (dist > 20) {
+            holdStateRef.current = { x: currentX, y: currentY };
+            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+            holdTimerRef.current = setTimeout(() => {
+                if (logicRef.current.snapToStraightLine) {
+                    logicRef.current.snapToStraightLine();
+                }
+            }, 500);
+        }
+    };
+
+    const handlePointerUp = () => {
+        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+        isDrawingRef.current = false;
+        holdStateRef.current = null;
     };
 
 
@@ -462,6 +463,12 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 ref={containerRef}
                 className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full ${isBlockDrawing ? 'pointer-events-none' : ''}`}
                 style={overlayMode ? {} : { height: '500px' }}
+                onPointerDownCapture={handlePointerDown}
+                onPointerMoveCapture={handlePointerMove}
+                onPointerUpCapture={handlePointerUp}
+                onPointerCancelCapture={handlePointerUp}
+                onPointerOutCapture={handlePointerUp}
+                onPointerLeaveCapture={handlePointerUp}
             >
                 <SignatureCanvas
                     ref={canvasRef}
@@ -481,8 +488,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                             WebkitTapHighlightColor: 'transparent'
                         }
                     }}
-                    onBegin={handleStrokeBegin}
-                    onEnd={handleStrokeEnd}
+                    onEnd={handleEndStrokeNative}
                 />
             </div>
 
