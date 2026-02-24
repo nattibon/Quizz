@@ -169,6 +169,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     useEffect(() => {
         const resizeCanvas = () => {
             if (canvasRef.current && containerRef.current) {
+                // DO NOT resize/clear canvas while actively drawing! (Protects against Android URL bar resize)
+                if (isDrawingRef.current) return;
+
                 const canvas = canvasRef.current.getCanvas();
                 const ratio = Math.max(window.devicePixelRatio || 1, 1);
 
@@ -408,7 +411,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (isDrawingRef.current && !isLineSnappedRef.current) {
             const pad = canvasRef.current?.getSignaturePad();
             if (pad) {
-                pad._strokeUpdate({ clientX: e.clientX, clientY: e.clientY });
+                // Use getCoalescedEvents to extract high-frequency hardware points
+                // that React batches into a single synthetic event. This makes strokes perfectly smooth!
+                const events = e.nativeEvent && e.nativeEvent.getCoalescedEvents
+                    ? e.nativeEvent.getCoalescedEvents()
+                    : [e];
+                for (let i = 0; i < events.length; i++) {
+                    pad._strokeUpdate({ clientX: events[i].clientX, clientY: events[i].clientY });
+                }
             }
         }
 
