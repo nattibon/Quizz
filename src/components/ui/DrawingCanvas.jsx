@@ -359,7 +359,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         const dy = end.y - start.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance > 20) {
+        if (distance > 10) {
             isLineSnappedRef.current = true;
 
             const straightPoints = [];
@@ -496,7 +496,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     clearOnResize={false}
                     canvasProps={{
                         className: `w-full h-full cursor-crosshair ${isDrawingMode ? 'touch-none select-none' : ''}`,
-                        style: { display: 'block' }
+                        style: {
+                            display: 'block',
+                            touchAction: 'none',
+                            WebkitTouchCallout: 'none',
+                            WebkitUserSelect: 'none',
+                            userSelect: 'none',
+                            WebkitTapHighlightColor: 'transparent'
+                        }
                     }}
                     onEnd={handleEndStrokeNative}
                 />
