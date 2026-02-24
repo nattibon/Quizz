@@ -206,27 +206,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         onSave(empty ? '' : canvas.toDataURL('image/png'));
     }, [onSave]);
 
-    // ── Global Touch Prevention ───────────────────────────
-    // Even with touchAction: 'none', Android Chrome sometimes hijacks long stylus strokes
-    // for scrolling if the stylus contact area is large or registers as a touch.
-    // This forcibly prevents all scrolling globally while the stylus is actively drawing.
-    useEffect(() => {
-        const preventTouchScroll = (e) => {
-            if (isDrawingRef.current) {
-                e.preventDefault();
-            }
-        };
-
-        // Must be non-passive to allow preventDefault()
-        window.addEventListener('touchmove', preventTouchScroll, { passive: false });
-        window.addEventListener('touchstart', preventTouchScroll, { passive: false });
-
-        return () => {
-            window.removeEventListener('touchmove', preventTouchScroll);
-            window.removeEventListener('touchstart', preventTouchScroll);
-        };
-    }, []);
-
     // ── Pointer events ────────────────────────────────────
     // Calculate precise coordinates relative to the canvas bounding rect
     const toCanvasCoords = (clientX, clientY, rect) => {
@@ -246,11 +225,15 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (!isDrawingMode) return;
         if (isBlockedRef.current) return;
 
-        // Lock touchAction to 'none' while stylus is drawing so the browser
-        // cannot intercept long drags as scroll gestures (this is the key fix
-        // for "can't do long strokes after zoom" on Android).
         const canvasEl = canvasRef.current;
-        if (canvasEl) canvasEl.style.touchAction = 'none';
+        // Lock canvas touchAction + attach a targeted non-passive touchmove blocker
+        // ONLY on the canvas element (not window) so pinch-to-zoom on the rest of the
+        // page still works, but the browser can't scroll-hijack a long stylus stroke.
+        if (canvasEl) {
+            canvasEl.style.touchAction = 'none';
+            canvasEl._blockTouch = (ev) => ev.preventDefault();
+            canvasEl.addEventListener('touchmove', canvasEl._blockTouch, { passive: false });
+        }
 
         // Cache rect for this stroke
         canvasRectRef.current = canvasRef.current.getBoundingClientRect();
@@ -311,8 +294,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
 
-            // Restore pan/zoom for fingers when stylus is no longer active
-            if (canvasEl) canvasEl.style.touchAction = isDrawingMode ? 'pan-x pan-y pinch-zoom' : 'auto';
+            // Restore pan/zoom gestures for fingers between strokes
+            if (canvasEl) {
+                if (canvasEl._blockTouch) {
+                    canvasEl.removeEventListener('touchmove', canvasEl._blockTouch);
+                    canvasEl._blockTouch = null;
+                }
+                canvasEl.style.touchAction = isDrawingMode ? 'pan-x pan-y pinch-zoom' : 'auto';
+            }
 
             if (ev.pointerType === 'touch') return;
             if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
