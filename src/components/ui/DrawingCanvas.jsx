@@ -51,7 +51,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, []);
 
     // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
-    const lastPointCountRef = useRef(0);
+    const holdStateRef = useRef(null);
 
     useEffect(() => {
         if (!canvasRef.current || !canvasRef.current._signaturePad) return;
@@ -64,47 +64,58 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // Patch Begin
         pad._strokeBegin = function (event) {
+            if (isBlockDrawingRef.current) return;
+
             isDrawingRef.current = true;
             isLineSnappedRef.current = false;
-            lastPointCountRef.current = 0;
+            holdStateRef.current = null;
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
 
             // Execute original
             originalBegin.call(this, event);
 
-            // Start the hold timer immediately for the first point
             startHoldTimer();
         };
 
         // Patch Update
         pad._strokeUpdate = function (event) {
+            if (isBlockDrawingRef.current || isLineSnappedRef.current) return;
+
             // Execute original
             originalUpdate.call(this, event);
 
-            if (isLineSnappedRef.current) return;
-
-            // Extract the active stroke array that was just updated
             const rawData = this._data;
             if (!rawData || rawData.length === 0) return;
             const currentStroke = rawData[rawData.length - 1]; // In v2 this is an array of points!
             if (!currentStroke || currentStroke.length === 0) return;
 
-            // Signature pad internally filters out micro-jitters (minDistance). 
-            // If the array grew, it means the user made a deliberate movement.
-            // If it didn't grow, the user is holding the pen still!
-            if (currentStroke.length > lastPointCountRef.current) {
-                lastPointCountRef.current = currentStroke.length;
+            const latestPoint = currentStroke[currentStroke.length - 1];
 
-                // Movement detected! Reset the hold timer.
+            // Initialize hold center if first time moving
+            if (!holdStateRef.current) {
+                holdStateRef.current = { x: latestPoint.x, y: latestPoint.y };
+                startHoldTimer();
+                return;
+            }
+
+            const dx = latestPoint.x - holdStateRef.current.x;
+            const dy = latestPoint.y - holdStateRef.current.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // 15 pixels resting radius threshold for hand tremors on iPad
+            if (dist > 15) {
+                // Pen moved outside resting radius, reset the hold center and start a fresh timer
+                holdStateRef.current = { x: latestPoint.x, y: latestPoint.y };
                 startHoldTimer();
             }
         };
 
         // Patch End
         pad._strokeEnd = function (event) {
-            // Cancel timer
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
             isDrawingRef.current = false;
+
+            if (isBlockDrawingRef.current || isLineSnappedRef.current) return;
 
             // Execute original
             originalEnd.call(this, event);
