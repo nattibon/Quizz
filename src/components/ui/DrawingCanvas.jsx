@@ -1,63 +1,45 @@
-import React, { useRef, useState, useEffect } from 'react';
-import SignatureCanvas from 'react-signature-canvas';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { Button } from './Button';
-import { Eraser, Undo, RefreshCcw, Save, PenTool, Highlighter } from 'lucide-react';
+import { Eraser, Undo, RefreshCcw, PenTool, Highlighter } from 'lucide-react';
+
+// ──────────────────────────────────────────────────────────
+// Pure Canvas2D drawing engine – no signature_pad internals.
+// All event handling uses PointerEvents (works on Android,
+// iOS Apple Pencil, and desktop mouse / trackpad).
+// ──────────────────────────────────────────────────────────
 
 export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = false, isDrawingMode = true }) {
-    const canvasRef = useRef(null);
+    // ── Refs ──────────────────────────────────────────────
+    const canvasRef = useRef(null);   // raw <canvas>
     const containerRef = useRef(null);
-    const [isEmpty, setIsEmpty] = useState(true);
-    const [activeTool, setActiveTool] = useState('pen'); // 'pen', 'highlighter', 'eraser'
-    const [currentColor, setCurrentColor] = useState('#0f172a'); // default slate-900
+    const ctxRef = useRef(null);   // canvas 2D context
 
-    // Hold-to-snap to straight line states
-    const startPointRef = useRef(null);
-    const lastPointRef = useRef(null);
-    const holdTimerRef = useRef(null);
-    const isDrawingRef = useRef(false);
-    const isLineSnappedRef = useRef(false);
-    const isBlockDrawingRef = useRef(false);
-    const [isBlockDrawing, setIsBlockDrawing] = useState(false);
-    const [lineSnapEnabled, setLineSnapEnabled] = useState(true);
-
-    // Custom internal caching due to signature_pad v2 dropping line widths from stroke exports
-    const cachedStrokesRef = useRef([]);
+    // current live-stroke points collected between pointerdown → pointerup
+    const currentStrokeRef = useRef([]);
+    // all completed strokes for undo / redraw
+    const strokesRef = useRef([]);
+    // background image from initialDataUrl
     const bgImageRef = useRef(null);
 
-    // Block finger touch at the canvas level using capture-phase events.
-    // Also CRITICALLY disables signature_pad's internal mouse/touch listeners.
-    // We will completely drive drawing using modern React PointerEvents below.
-    useEffect(() => {
-        const canvas = canvasRef.current?.getCanvas();
-        const pad = canvasRef.current?.getSignaturePad();
-        if (!canvas || !pad) return;
+    // current tool style (populated in getToolStyle())
+    const toolStyleRef = useRef({});
 
-        // Permanently turn off signature_pad's legacy event listeners
-        pad.off();
+    // straight-line snap state
+    const isDrawingRef = useRef(false);
+    const isSnappedRef = useRef(false);
+    const holdTimerRef = useRef(null);
+    const holdOriginRef = useRef(null);
 
-        const blockFingerTouch = (event) => {
-            const touch = event.changedTouches?.[0] || event.targetTouches?.[0];
-            // Allow Apple Pencil on iOS Safari (touchType === 'stylus')
-            if (touch?.touchType === 'stylus') return;
-            // Block finger: prevent default (no scroll) and stop signature_pad from receiving it
-            event.preventDefault();
-            event.stopImmediatePropagation();
-        };
+    // block-drawing after snap until pointer up
+    const isBlockedRef = useRef(false);
 
-        canvas.addEventListener('touchstart', blockFingerTouch, { capture: true, passive: false });
-        canvas.addEventListener('touchmove', blockFingerTouch, { capture: true, passive: false });
-        canvas.addEventListener('touchend', blockFingerTouch, { capture: true, passive: false });
+    // ── State ─────────────────────────────────────────────
+    const [isEmpty, setIsEmpty] = useState(true);
+    const [activeTool, setActiveTool] = useState('pen');
+    const [currentColor, setCurrentColor] = useState('#0f172a');
+    const [isBlocked, setIsBlocked] = useState(false);
 
-        return () => {
-            canvas.removeEventListener('touchstart', blockFingerTouch, { capture: true });
-            canvas.removeEventListener('touchmove', blockFingerTouch, { capture: true });
-            canvas.removeEventListener('touchend', blockFingerTouch, { capture: true });
-        };
-    }, []);
-
-    // --- Monkey-patch SignaturePad to detect holds using its exact native data ---
-    // Cleaned up monkey patch logic. Using manual native pointer events now!
-
+    // ── Tool config ───────────────────────────────────────
     const colors = [
         { name: 'ดำ (Black)', value: '#0f172a', bgClass: 'bg-slate-900' },
         { name: 'น้ำเงิน (Blue)', value: '#2563eb', bgClass: 'bg-blue-600' },
@@ -69,408 +51,307 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         { name: 'ฟ้า (Teal)', value: '#0d9488', bgClass: 'bg-teal-600' },
     ];
 
-    // Determine current canvas properties based on tool and color
-    let penColor = currentColor;
-    let minWidth = 1.5;
-    let maxWidth = 4;
-    let velocityFilterWeight = 0.7;
+    const highlighterMap = {
+        '#0f172a': '#fde047', '#2563eb': '#93c5fd', '#dc2626': '#fca5a5',
+        '#16a34a': '#86efac', '#9333ea': '#d8b4fe', '#db2777': '#fbcfe8',
+        '#ea580c': '#fdba74', '#0d9488': '#5eead4',
+    };
 
-    if (activeTool === 'highlighter') {
-        const solidMap = {
-            '#0f172a': '#fde047', // Yellow for default (black)
-            '#2563eb': '#93c5fd', // Light Blue
-            '#dc2626': '#fca5a5', // Light Red
-            '#16a34a': '#86efac', // Light Green
-            '#9333ea': '#d8b4fe', // Light Purple
-            '#db2777': '#fbcfe8', // Light Pink
-            '#ea580c': '#fdba74', // Light Orange
-            '#0d9488': '#5eead4'  // Light Teal
-        };
-        penColor = solidMap[currentColor] || '#fde047';
-        minWidth = 14;
-        maxWidth = 20;
-        velocityFilterWeight = 0.5; // Moderate smoothing
-    } else if (activeTool === 'eraser') {
-        penColor = '#ffffff'; // Draw over with white background
-        minWidth = 16;
-        minWidth = 16;
-        maxWidth = 24;
-    }
+    const getToolStyle = useCallback(() => {
+        if (activeTool === 'highlighter') {
+            return { color: highlighterMap[currentColor] || '#fde047', lineWidth: 18, alpha: 0.45 };
+        }
+        if (activeTool === 'eraser') {
+            return { color: '#ffffff', lineWidth: 22, alpha: 1, composite: 'destination-out' };
+        }
+        return { color: currentColor, lineWidth: 3, alpha: 1 };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTool, currentColor]);
 
-    // Master renderer to reconstruct canvas cleanly keeping diverse stroke styles
-    const redrawCustomStrokes = () => {
-        if (!canvasRef.current) return;
-        const pad = canvasRef.current.getSignaturePad();
-        if (!pad) return;
+    // ── Canvas drawing helpers ────────────────────────────
 
-        const ctx = pad._ctx;
-        const canvas = pad._canvas;
-        const ratio = Math.max(window.devicePixelRatio || 1, 1);
-        const w = canvas.width / ratio;
-        const h = canvas.height / ratio;
+    /** Fully redraw from the strokes cache onto the canvas. */
+    const redraw = useCallback(() => {
+        const canvas = canvasRef.current;
+        const ctx = ctxRef.current;
+        if (!canvas || !ctx) return;
 
-        // Clear
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.restore();
-        ctx.fillStyle = pad.backgroundColor || 'rgba(0,0,0,0)';
-        ctx.fillRect(0, 0, w, h);
 
         if (bgImageRef.current) {
-            ctx.drawImage(bgImageRef.current, 0, 0, w, h);
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            ctx.drawImage(bgImageRef.current, 0, 0, canvas.width / ratio, canvas.height / ratio);
         }
 
-        const strokes = cachedStrokesRef.current;
-
-        strokes.forEach(stroke => {
-            const pts = stroke.points;
-            if (!pts || pts.length === 0) return;
-
-            const lw = (stroke.minWidth + stroke.maxWidth) / 2;
-
-            ctx.beginPath();  // ← guaranteed clean path per stroke
-            ctx.strokeStyle = stroke.penColor;
-            ctx.lineWidth = lw;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-
-            if (pts.length === 1) {
-                // Single tap: draw a filled dot
-                ctx.fillStyle = stroke.penColor;
-                ctx.arc(pts[0].x, pts[0].y, lw / 2, 0, 2 * Math.PI);
-                ctx.fill();
-            } else {
-                ctx.moveTo(pts[0].x, pts[0].y);
-                for (let i = 1; i < pts.length - 1; i++) {
-                    // Smooth midpoint curve
-                    const mx = (pts[i].x + pts[i + 1].x) / 2;
-                    const my = (pts[i].y + pts[i + 1].y) / 2;
-                    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-                }
-                // Last segment
-                const last = pts[pts.length - 1];
-                ctx.lineTo(last.x, last.y);
-                ctx.stroke();
-            }
-        });
-
-        // Keep pad._data in sync so undo/save work correctly
-        pad._data = strokes.map(s => s.points);
-        pad._isEmpty = strokes.length === 0 && !bgImageRef.current;
-
-        // Restore active tool color to pad so next live stroke uses correct color
-        pad.penColor = penColor;
-        ctx.fillStyle = penColor;
-        ctx.strokeStyle = penColor;
-    };
-
-    // Initial Resize and Window Resize listener
-    useEffect(() => {
-        const resizeCanvas = () => {
-            if (canvasRef.current && containerRef.current) {
-                // DO NOT resize/clear canvas while actively drawing! (Protects against Android URL bar resize)
-                if (isDrawingRef.current) return;
-
-                const canvas = canvasRef.current.getCanvas();
-                const ratio = Math.max(window.devicePixelRatio || 1, 1);
-
-                // Save current drawing
-                const data = canvasRef.current.toData();
-
-                const rect = containerRef.current.getBoundingClientRect();
-
-                // Update internal resolution to match display size exactly, accounting for pixel density
-                canvas.width = rect.width * ratio;
-                canvas.height = rect.height * ratio;
-                canvas.getContext("2d").scale(ratio, ratio);
-
-                // For react-signature-canvas, we also need to inform the internal pad of the new dimensions
-                const pad = canvasRef.current.getSignaturePad();
-                if (pad) {
-                    pad.clear();
-                }
-
-                // Restore drawing cleanly from our diverse styles cache
-                redrawCustomStrokes();
-            }
-        };
-
-        const handleScroll = () => {
-            // Force the signature pad to update its internal offset mapping
-            if (canvasRef.current && canvasRef.current._signaturePad) {
-                // accessing private method to force coordinate recalculation on scroll
-                // This is a known workaround for react-signature-canvas offset bugs
-            }
-        };
-
-        // Resize on mount and when window resizes
-        const timeoutId = setTimeout(resizeCanvas, 150);
-        window.addEventListener("resize", resizeCanvas);
-        window.addEventListener("scroll", handleScroll, { passive: true });
-
-        return () => {
-            window.removeEventListener("resize", resizeCanvas);
-            window.removeEventListener("scroll", handleScroll);
-            clearTimeout(timeoutId);
+        for (const stroke of strokesRef.current) {
+            drawStroke(ctx, stroke.points, stroke.style);
         }
     }, []);
 
-    // Load initial data if provided
-    useEffect(() => {
-        if (initialDataUrl && canvasRef.current) {
-            const img = new Image();
-            img.onload = () => {
-                bgImageRef.current = img;
-                if (canvasRef.current) {
-                    canvasRef.current.fromDataURL(initialDataUrl);
-                    setIsEmpty(false);
-                }
-            };
-            img.src = initialDataUrl;
-        }
-    }, [initialDataUrl]);
+    /** Draw a single stroke's points using a smooth quadratic bezier mid-point algorithm. */
+    function drawStroke(ctx, pts, style) {
+        if (!pts || pts.length === 0) return;
+        ctx.save();
+        ctx.globalAlpha = style.alpha ?? 1;
+        ctx.globalCompositeOperation = style.composite ?? 'source-over';
+        ctx.strokeStyle = style.color;
+        ctx.lineWidth = style.lineWidth;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
 
-    const handleClear = () => {
-        cachedStrokesRef.current = [];
-        bgImageRef.current = null;
-        if (canvasRef.current) canvasRef.current.clear();
-        setIsEmpty(true);
-        onSave(''); // Clear saved data
-        isLineSnappedRef.current = false;
-    };
-
-    const handleUndo = () => {
-        if (!canvasRef.current) return;
-
-        if (cachedStrokesRef.current.length > 0) {
-            cachedStrokesRef.current.pop(); // remove last stroke
-            redrawCustomStrokes();
-
-            if (cachedStrokesRef.current.length === 0 && !bgImageRef.current) {
-                setIsEmpty(true);
-                onSave('');
-            } else {
-                onSave(canvasRef.current.toDataURL('image/png'));
-            }
-        } else if (bgImageRef.current) {
-            // Let them wipe the background if strokes are empty
-            handleClear();
-        }
-    };
-
-    const handleEndStrokeNative = () => {
-        if (!isLineSnappedRef.current && canvasRef.current) {
-            const pad = canvasRef.current.getSignaturePad();
-            if (pad) {
-                const rawData = pad._data;
-                if (rawData && rawData.length > 0) {
-                    const currentPoints = rawData[rawData.length - 1]; // Array of points
-                    cachedStrokesRef.current.push({
-                        points: [...currentPoints],
-                        penColor,
-                        minWidth,
-                        maxWidth,
-                        velocityFilterWeight
-                    });
-                }
-            }
-        }
-
-        setIsEmpty(canvasRef.current.isEmpty());
-        if (!canvasRef.current.isEmpty()) {
-            onSave(canvasRef.current.toDataURL('image/png'));
+        if (pts.length === 1) {
+            // Single tap → filled dot
+            ctx.arc(pts[0].x, pts[0].y, style.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fillStyle = style.color;
+            ctx.fill();
         } else {
-            onSave('');
-        }
-    };
-
-    const logicRef = useRef({});
-
-    useEffect(() => {
-        logicRef.current = {
-            snapToStraightLine: () => {
-                if (!isDrawingRef.current || isLineSnappedRef.current) return;
-                const pad = canvasRef.current ? canvasRef.current.getSignaturePad() : null;
-                if (!pad) {
-                    return;
-                }
-
-                const rawData = pad._data;
-                if (!rawData || rawData.length === 0) return;
-
-                const currentStroke = rawData[rawData.length - 1]; // Array of points
-                if (!currentStroke || currentStroke.length < 2) return; // Allow 2 point strokes
-
-                const start = currentStroke[0];
-                const end = currentStroke[currentStroke.length - 1];
-
-                const dx = end.x - start.x;
-                const dy = end.y - start.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance > 10) {
-                    isLineSnappedRef.current = true;
-
-
-                    const straightPoints = [];
-                    const steps = Math.max(10, Math.floor(distance / 5));
-                    const timeStep = Math.max(10, (end.time - start.time) / steps);
-
-                    for (let i = 0; i <= steps; i++) {
-                        const t = i / steps;
-                        straightPoints.push({
-                            x: start.x + dx * t,
-                            y: start.y + dy * t,
-                            time: start.time + (timeStep * i),
-                            color: currentStroke[0]?.color || penColor,
-                        });
-                    }
-
-                    // Clear the current in-progress stroke from the pad
-                    // We use the react wrapper's public clear() then redrawCustomStrokes redraws
-                    // everything cleanly
-                    const newStroke = {
-                        points: straightPoints,
-                        penColor: currentStroke[0]?.color || penColor,
-                        minWidth,
-                        maxWidth,
-                        velocityFilterWeight
-                    };
-
-                    cachedStrokesRef.current.push(newStroke);
-
-                    // Disable further drawing until user lifts pointer
-                    pad.off();
-                    isBlockDrawingRef.current = true;
-                    setIsBlockDrawing(true);
-
-                    // Clear the pad completely and redraw from our cache
-                    canvasRef.current.clear();
-                    redrawCustomStrokes();
-
-
-                    // Save
-                    if (!canvasRef.current.isEmpty()) {
-                        onSave(canvasRef.current.toDataURL('image/png'));
-                    }
-                    setIsEmpty(false);
-                }
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length - 1; i++) {
+                const mx = (pts[i].x + pts[i + 1].x) / 2;
+                const my = (pts[i].y + pts[i + 1].y) / 2;
+                ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
             }
-        };
-    }); // no deps array = runs every render, always has fresh closure
+            const last = pts[pts.length - 1];
+            ctx.lineTo(last.x, last.y);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
 
-    const holdStateRef = useRef(null);
+    /** Append a single point to an in-progress stroke, drawing just the new segment. */
+    function drawLivePoint(pt, pts, style) {
+        const ctx = ctxRef.current;
+        if (!ctx) return;
+        pts.push(pt);
+        const n = pts.length;
+        if (n < 2) return;
+
+        ctx.save();
+        ctx.globalAlpha = style.alpha ?? 1;
+        ctx.globalCompositeOperation = style.composite ?? 'source-over';
+        ctx.strokeStyle = style.color;
+        ctx.lineWidth = style.lineWidth;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+
+        if (n === 2) {
+            ctx.moveTo(pts[0].x, pts[0].y);
+            ctx.lineTo(pts[1].x, pts[1].y);
+        } else {
+            // extend the existing smooth path
+            const prev = pts[n - 3], cur = pts[n - 2], next = pts[n - 1];
+            const mx1 = (prev.x + cur.x) / 2, my1 = (prev.y + cur.y) / 2;
+            const mx2 = (cur.x + next.x) / 2, my2 = (cur.y + next.y) / 2;
+            ctx.moveTo(mx1, my1);
+            ctx.quadraticCurveTo(cur.x, cur.y, mx2, my2);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // ── Resize & Init ─────────────────────────────────────
+    const resizeCanvas = useCallback(() => {
+        if (isDrawingRef.current) return; // never resize mid-stroke
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        if (!canvas || !container) return;
+
+        const ratio = Math.max(window.devicePixelRatio || 1, 1);
+        const w = container.offsetWidth;
+        const h = container.offsetHeight;
+
+        canvas.width = w * ratio;
+        canvas.height = h * ratio;
+        canvas.style.width = `${w}px`;
+        canvas.style.height = `${h}px`;
+
+        const ctx = canvas.getContext('2d');
+        ctx.scale(ratio, ratio);
+        ctxRef.current = ctx;
+        redraw();
+    }, [redraw]);
+
+    // On mount: size + listen for resize
+    useEffect(() => {
+        const id = setTimeout(resizeCanvas, 0);
+        window.addEventListener('resize', resizeCanvas);
+        return () => { window.removeEventListener('resize', resizeCanvas); clearTimeout(id); };
+    }, [resizeCanvas]);
+
+    // Load initialDataUrl as background
+    useEffect(() => {
+        if (!initialDataUrl) return;
+        const img = new Image();
+        img.onload = () => {
+            bgImageRef.current = img;
+            redraw();
+            setIsEmpty(false);
+        };
+        img.src = initialDataUrl;
+    }, [initialDataUrl, redraw]);
+
+    // ── Save helper ───────────────────────────────────────
+    const saveCanvas = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const empty = strokesRef.current.length === 0 && !bgImageRef.current;
+        setIsEmpty(empty);
+        onSave(empty ? '' : canvas.toDataURL('image/png'));
+    }, [onSave]);
+
+    // ── Pointer events ────────────────────────────────────
+    const getCanvasPoint = (e) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
 
     const handlePointerDown = (e) => {
-        // Only allow pen (Apple Pencil / Stylus) or mouse. Reject finger touch.
-        if (e.pointerType === 'touch') return;
-        if (isBlockDrawingRef.current) return;
+        if (e.pointerType === 'touch') return;  // reject fingers
+        if (!isDrawingMode) return;
+        if (isBlockedRef.current) return;
 
-        // 1. Manually command signature_pad to begin drawing
-        if (isDrawingMode) {
-            try { e.target.setPointerCapture(e.pointerId); } catch (err) { }
-            const pad = canvasRef.current?.getSignaturePad();
-            if (pad) {
-                // Ensure internal pad state perfectly matches our calculated React state before stroke begins
-                pad.penColor = penColor;
-                pad.minWidth = minWidth;
-                pad.maxWidth = maxWidth;
-                pad.velocityFilterWeight = velocityFilterWeight;
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) { }
 
-                pad._strokeBegin({ clientX: e.clientX, clientY: e.clientY });
-            }
-            isDrawingRef.current = true;
-        }
+        toolStyleRef.current = getToolStyle();
+        isDrawingRef.current = true;
+        isSnappedRef.current = false;
+        const pt = getCanvasPoint(e);
+        currentStrokeRef.current = [pt];
 
-        // 2. Start tracking for straight-line snap (only for pen/highlighter)
-        isLineSnappedRef.current = false;
-        if (isDrawingMode && activeTool !== 'eraser') {
-            if (containerRef.current) {
-                const rect = containerRef.current.getBoundingClientRect();
-                holdStateRef.current = {
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top
-                };
-            }
-
+        // Start hold timer for snap-to-line
+        if (activeTool !== 'eraser') {
+            holdOriginRef.current = pt;
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-            holdTimerRef.current = setTimeout(() => {
-                if (logicRef.current.snapToStraightLine) {
-                    logicRef.current.snapToStraightLine();
-                }
-            }, 500);
+            holdTimerRef.current = setTimeout(snapToLine, 500);
         }
     };
 
     const handlePointerMove = (e) => {
         if (e.pointerType === 'touch') return;
-        if (isBlockDrawingRef.current) return;
+        if (!isDrawingRef.current || isSnappedRef.current || isBlockedRef.current) return;
 
-        // 1. Target pad draw update directly
-        if (isDrawingRef.current && !isLineSnappedRef.current) {
-            const pad = canvasRef.current?.getSignaturePad();
-            if (pad) {
-                // Use getCoalescedEvents to extract high-frequency hardware points
-                // that React batches into a single synthetic event. This makes strokes perfectly smooth!
-                const events = e.nativeEvent && e.nativeEvent.getCoalescedEvents
-                    ? e.nativeEvent.getCoalescedEvents()
-                    : [e];
-                for (let i = 0; i < events.length; i++) {
-                    pad._strokeUpdate({ clientX: events[i].clientX, clientY: events[i].clientY });
-                }
-            }
+        // Use coalesced events for full hardware resolution
+        const rawEvents = (e.nativeEvent?.getCoalescedEvents?.() ?? [e.nativeEvent ?? e]);
+        for (const re of rawEvents) {
+            const pt = {
+                x: re.clientX - canvasRef.current.getBoundingClientRect().left,
+                y: re.clientY - canvasRef.current.getBoundingClientRect().top
+            };
+            drawLivePoint(pt, currentStrokeRef.current, toolStyleRef.current);
         }
 
-        // 2. Update hold snap detection
-        if (!isDrawingRef.current || isLineSnappedRef.current || activeTool === 'eraser') return;
-        if (!holdStateRef.current || !containerRef.current) return;
-
-        const rect = containerRef.current.getBoundingClientRect();
-        const currentX = e.clientX - rect.left;
-        const currentY = e.clientY - rect.top;
-
-        const dx = currentX - holdStateRef.current.x;
-        const dy = currentY - holdStateRef.current.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist > 20) {
-            holdStateRef.current = { x: currentX, y: currentY };
-            if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-            holdTimerRef.current = setTimeout(() => {
-                if (logicRef.current.snapToStraightLine) {
-                    logicRef.current.snapToStraightLine();
-                }
-            }, 500);
+        // Reset hold-timer if stylus moves significantly
+        if (activeTool !== 'eraser' && holdOriginRef.current) {
+            const pt = getCanvasPoint(e);
+            const dx = pt.x - holdOriginRef.current.x;
+            const dy = pt.y - holdOriginRef.current.y;
+            if (Math.sqrt(dx * dx + dy * dy) > 20) {
+                holdOriginRef.current = pt;
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = setTimeout(snapToLine, 500);
+            }
         }
     };
 
     const handlePointerUp = (e) => {
         if (e.pointerType === 'touch') return;
 
-        if (isBlockDrawingRef.current) {
-            setIsBlockDrawing(false);
-            isBlockDrawingRef.current = false;
-            // Pad is already 'off' and Native event was replaced, so we just return.
+        try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) { }
+        if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+
+        if (isBlockedRef.current) {
+            isBlockedRef.current = false;
+            setIsBlocked(false);
             return;
         }
 
-        try { e.target.releasePointerCapture(e.pointerId); } catch (err) { }
+        if (!isDrawingRef.current) return;
+        isDrawingRef.current = false;
 
-        // Complete stroke cleanly
-        if (isDrawingRef.current && !isLineSnappedRef.current) {
-            const pad = canvasRef.current?.getSignaturePad();
-            if (pad) {
-                pad._strokeEnd({ clientX: e.clientX, clientY: e.clientY });
-            }
+        if (isSnappedRef.current) {
+            isSnappedRef.current = false;
+            return;
         }
 
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        isDrawingRef.current = false;
-        holdStateRef.current = null;
+        // Commit stroke
+        const pts = currentStrokeRef.current;
+        if (pts.length > 0) {
+            strokesRef.current.push({ points: pts, style: { ...toolStyleRef.current } });
+            currentStrokeRef.current = [];
+            saveCanvas();
+        }
     };
 
+    // ── Snap to straight line ─────────────────────────────
+    const snapToLine = useCallback(() => {
+        if (!isDrawingRef.current || isSnappedRef.current) return;
+        const pts = currentStrokeRef.current;
+        if (!pts || pts.length < 2) return;
 
+        const start = pts[0];
+        const end = pts[pts.length - 1];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 10) return;
+
+        isSnappedRef.current = true;
+
+        // Build perfectly straight point array
+        const steps = Math.max(10, Math.floor(dist / 5));
+        const linePts = Array.from({ length: steps + 1 }, (_, i) => ({
+            x: start.x + dx * (i / steps),
+            y: start.y + dy * (i / steps),
+        }));
+
+        // Redraw everything + the snapped line preview
+        redraw();
+        drawStroke(ctxRef.current, linePts, toolStyleRef.current);
+
+        // Commit it
+        strokesRef.current.push({ points: linePts, style: { ...toolStyleRef.current } });
+        currentStrokeRef.current = [];
+
+        // Block further drawing until pen lifts
+        isBlockedRef.current = true;
+        setIsBlocked(true);
+        isDrawingRef.current = false;
+
+        saveCanvas();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [redraw, saveCanvas]);
+
+    // ── Undo / Clear ──────────────────────────────────────
+    const handleUndo = () => {
+        if (strokesRef.current.length === 0) return;
+        strokesRef.current.pop();
+        redraw();
+        saveCanvas();
+    };
+
+    const handleClear = () => {
+        strokesRef.current = [];
+        bgImageRef.current = null;
+        currentStrokeRef.current = [];
+        redraw();
+        setIsEmpty(true);
+        onSave('');
+    };
+
+    // ── getCursorStyle ────────────────────────────────────
+    const getCursorStyle = () => {
+        if (!isDrawingMode) return 'default';
+        if (activeTool === 'eraser') return 'cell';
+        return 'crosshair';
+    };
+
+    // ── Render ────────────────────────────────────────────
     return (
         <div className={`w-full ${overlayMode ? 'absolute inset-0 pointer-events-none' : 'flex flex-col gap-3'}`}>
             {/* Toolbar */}
@@ -479,45 +360,26 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                     <div className="flex flex-wrap items-center gap-2">
                         {/* Tool Picker */}
                         <div className="flex bg-slate-100 p-1 rounded-lg">
-                            <button
-                                type="button"
-                                onClick={() => setActiveTool('pen')}
+                            <button type="button" onClick={() => setActiveTool('pen')}
                                 className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'pen' ? 'bg-white shadow-sm text-primary-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                                title="ปากกา (Pen)"
-                            >
-                                <PenTool size={18} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTool('highlighter')}
+                                title="ปากกา (Pen)"><PenTool size={18} /></button>
+                            <button type="button" onClick={() => setActiveTool('highlighter')}
                                 className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'highlighter' ? 'bg-white shadow-sm text-amber-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                                title="ไฮไลต์ (Highlighter)"
-                            >
-                                <Highlighter size={18} />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setActiveTool('eraser')}
+                                title="ไฮไลต์ (Highlighter)"><Highlighter size={18} /></button>
+                            <button type="button" onClick={() => setActiveTool('eraser')}
                                 className={`p-2 rounded-md flex items-center transition-colors ${activeTool === 'eraser' ? 'bg-white shadow-sm text-pink-500 font-medium' : 'text-slate-500 hover:text-slate-800'}`}
-                                title="ยางลบ (Eraser)"
-                            >
-                                <Eraser size={18} />
-                            </button>
+                                title="ยางลบ (Eraser)"><Eraser size={18} /></button>
                         </div>
 
-                        {/* Separator */}
-                        <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block"></div>
+                        <div className="w-px h-6 bg-slate-200 mx-1 hidden sm:block" />
 
                         {/* Color Picker */}
                         <div className="flex gap-2 items-center bg-slate-50 px-2 py-1.5 rounded-lg border border-slate-100">
                             {colors.map(c => (
-                                <button
-                                    key={c.value}
-                                    type="button"
+                                <button key={c.value} type="button"
                                     onClick={() => { setCurrentColor(c.value); if (activeTool === 'eraser') setActiveTool('pen'); }}
                                     className={`w-6 h-6 rounded-full border-2 transition-transform outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500 ${currentColor === c.value && activeTool !== 'eraser' ? 'scale-125 border-primary-300' : 'border-transparent hover:scale-110'} ${c.bgClass} shadow-sm`}
-                                    title={c.name}
-                                    aria-label={`เลือกสี ${c.name}`}
+                                    title={c.name} aria-label={`เลือกสี ${c.name}`}
                                 />
                             ))}
                         </div>
@@ -525,68 +387,52 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
                     {/* Actions */}
                     <div className="flex gap-2 w-full sm:w-auto justify-end mt-2 sm:mt-0">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={handleUndo}
-                            disabled={isEmpty}
-                            className="text-slate-600 hover:text-slate-900"
-                        >
+                        <Button type="button" variant="outline" size="sm" onClick={handleUndo} disabled={isEmpty}
+                            className="text-slate-600 hover:text-slate-900">
                             <Undo className="w-4 h-4 mr-1.5" /> ย้อนกลับ
                         </Button>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleClear}
-                            disabled={isEmpty}
-                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                        >
+                        <Button type="button" variant="ghost" size="sm" onClick={handleClear} disabled={isEmpty}
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700">
                             <RefreshCcw className="w-4 h-4 mr-1.5" /> ล้าง
                         </Button>
                     </div>
                 </div>
             )}
 
+            {/* Canvas container */}
             <div
                 ref={containerRef}
-                className={`${overlayMode ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}` : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative touch-none'} w-full ${isBlockDrawing ? 'pointer-events-none' : ''}`}
+                className={`${overlayMode
+                    ? `absolute inset-0 mix-blend-multiply z-40 ${isDrawingMode ? 'pointer-events-auto' : 'pointer-events-none'}`
+                    : 'border-2 border-slate-200 rounded-xl bg-white overflow-hidden shadow-inner relative'
+                    } w-full`}
                 style={overlayMode ? {} : { height: '500px' }}
-                onPointerDownCapture={handlePointerDown}
-                onPointerMoveCapture={handlePointerMove}
-                onPointerUpCapture={handlePointerUp}
-                onPointerCancelCapture={handlePointerUp}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
             >
-                <SignatureCanvas
+                <canvas
                     ref={canvasRef}
-                    penColor={penColor}
-                    velocityFilterWeight={velocityFilterWeight}
-                    minWidth={minWidth}
-                    maxWidth={maxWidth}
-                    clearOnResize={false}
-                    canvasProps={{
-                        className: `w-full h-full cursor-crosshair ${isDrawingMode ? 'touch-none select-none' : ''}`,
-                        style: {
-                            display: 'block',
-                            touchAction: 'none',
-                            WebkitTouchCallout: 'none',
-                            WebkitUserSelect: 'none',
-                            userSelect: 'none',
-                            WebkitTapHighlightColor: 'transparent'
-                        }
+                    style={{
+                        display: 'block',
+                        width: '100%',
+                        height: '100%',
+                        touchAction: 'none',
+                        cursor: getCursorStyle(),
+                        WebkitTouchCallout: 'none',
+                        WebkitUserSelect: 'none',
+                        userSelect: 'none',
+                        WebkitTapHighlightColor: 'transparent',
                     }}
-                    onEnd={handleEndStrokeNative}
                 />
             </div>
 
             {!overlayMode && (
                 <p className="text-xs text-slate-400 text-right pr-2 mt-1">
-                    รองรับการใช้นิ้วมือ และ ปากกา Stylus สำหรับแท็บเล็ต ระบบจะเริ่มบันทึกอัตโนมัติเมื่อวาดเสร็จ
+                    รองรับปากกา Stylus และเมาส์ ระบบจะบันทึกอัตโนมัติเมื่อวาดเสร็จ
                 </p>
             )}
         </div>
     );
 }
-
-
