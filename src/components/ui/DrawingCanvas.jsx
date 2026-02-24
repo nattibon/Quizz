@@ -27,6 +27,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     // Global listener to release the UI block when user lifts pen after snapping
     useEffect(() => {
         const handleGlobalUp = () => {
+            // Cancel any pending hold timer (this is the reliable place to do it)
+            if (holdTimerRef.current) {
+                clearTimeout(holdTimerRef.current);
+                holdTimerRef.current = null;
+            }
+            isDrawingRef.current = false;
+            if (holdStateRef.current) holdStateRef.current = null;
+
             if (isBlockDrawingRef.current) {
                 setIsBlockDrawing(false);
                 isBlockDrawingRef.current = false;
@@ -94,8 +102,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
     // Master renderer to reconstruct canvas cleanly keeping diverse tools styles
     const redrawCustomStrokes = () => {
-        if (!canvasRef.current || !canvasRef.current._signaturePad) return;
-        const pad = canvasRef.current._signaturePad;
+        if (!canvasRef.current) return;
+        const pad = canvasRef.current.getSignaturePad();
+        if (!pad) return;
 
         pad.clear();
 
@@ -161,8 +170,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 canvas.getContext("2d").scale(ratio, ratio);
 
                 // For react-signature-canvas, we also need to inform the internal pad of the new dimensions
-                if (canvasRef.current._signaturePad) {
-                    canvasRef.current._signaturePad.clear();
+                const pad = canvasRef.current.getSignaturePad();
+                if (pad) {
+                    pad.clear();
                 }
 
                 // Restore drawing cleanly from our diverse styles cache
@@ -234,18 +244,20 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     };
 
     const handleEndStrokeNative = () => {
-        if (!isLineSnappedRef.current && canvasRef.current && canvasRef.current._signaturePad) {
-            const pad = canvasRef.current._signaturePad;
-            const rawData = pad._data;
-            if (rawData && rawData.length > 0) {
-                const currentPoints = rawData[rawData.length - 1]; // Array of points
-                cachedStrokesRef.current.push({
-                    points: [...currentPoints],
-                    penColor,
-                    minWidth,
-                    maxWidth,
-                    velocityFilterWeight
-                });
+        if (!isLineSnappedRef.current && canvasRef.current) {
+            const pad = canvasRef.current.getSignaturePad();
+            if (pad) {
+                const rawData = pad._data;
+                if (rawData && rawData.length > 0) {
+                    const currentPoints = rawData[rawData.length - 1]; // Array of points
+                    cachedStrokesRef.current.push({
+                        points: [...currentPoints],
+                        penColor,
+                        minWidth,
+                        maxWidth,
+                        velocityFilterWeight
+                    });
+                }
             }
         }
 
@@ -262,12 +274,14 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     useEffect(() => {
         logicRef.current = {
             snapToStraightLine: () => {
-                if (!isDrawingRef.current || isLineSnappedRef.current) return;
-                if (!canvasRef.current || !canvasRef.current._signaturePad) return;
+                                if (!isDrawingRef.current || isLineSnappedRef.current) return;
+                const pad = canvasRef.current ? canvasRef.current.getSignaturePad() : null;
+                if (!pad) {
+                                        return;
+                }
 
-                const pad = canvasRef.current._signaturePad;
                 const rawData = pad._data;
-                if (!rawData || rawData.length === 0) return;
+                                if (!rawData || rawData.length === 0) return;
 
                 const currentStroke = rawData[rawData.length - 1]; // Array of points
                 if (!currentStroke || currentStroke.length < 2) return; // Allow 2 point strokes
@@ -278,10 +292,11 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 const dx = end.x - start.x;
                 const dy = end.y - start.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
-
+                
                 if (distance > 10) {
                     isLineSnappedRef.current = true;
 
+                    
                     const straightPoints = [];
                     const steps = Math.max(10, Math.floor(distance / 5));
                     const timeStep = Math.max(10, (end.time - start.time) / steps);
@@ -296,12 +311,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                         });
                     }
 
-                    // Stop internal drawing smoothly without firing the user-facing onEnd
-                    const origOnEnd = pad.onEnd;
-                    pad.onEnd = null;
-                    pad._strokeEnd(new Event('mouseup'));
-                    pad.onEnd = origOnEnd;
-
+                    // Clear the current in-progress stroke from the pad
+                    // We use the react wrapper's public clear() then redrawCustomStrokes redraws
+                    // everything cleanly
                     const newStroke = {
                         points: straightPoints,
                         penColor: currentStroke[0]?.color || penColor,
@@ -312,23 +324,30 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
                     cachedStrokesRef.current.push(newStroke);
 
+                    // Disable further drawing until user lifts pointer
                     pad.off();
                     isBlockDrawingRef.current = true;
                     setIsBlockDrawing(true);
 
+                    // Clear the pad completely and redraw from our cache
+                    canvasRef.current.clear();
                     redrawCustomStrokes();
 
-                    // Explicitly call the save since we bypassed normal end hooks
-                    handleEndStrokeNative();
+                    
+                    // Save
+                    if (!canvasRef.current.isEmpty()) {
+                        onSave(canvasRef.current.toDataURL('image/png'));
+                    }
+                    setIsEmpty(false);
                 }
             }
         };
-    }, []);
+    }); // no deps array = runs every render, always has fresh closure
 
     const holdStateRef = useRef(null);
 
     const handlePointerDown = (e) => {
-        if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
+                if (!isDrawingMode || activeTool === 'eraser' || isBlockDrawing) return;
 
         isDrawingRef.current = true;
         isLineSnappedRef.current = false;
@@ -342,9 +361,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             };
         }
 
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
         holdTimerRef.current = setTimeout(() => {
-            if (logicRef.current.snapToStraightLine) {
+                        if (logicRef.current.snapToStraightLine) {
                 logicRef.current.snapToStraightLine();
             }
         }, 500);
@@ -364,10 +383,10 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
 
         // If moved more than 20px radius, user is still deliberately gesturing.
         if (dist > 20) {
-            holdStateRef.current = { x: currentX, y: currentY };
+                        holdStateRef.current = { x: currentX, y: currentY };
             if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
             holdTimerRef.current = setTimeout(() => {
-                if (logicRef.current.snapToStraightLine) {
+                                if (logicRef.current.snapToStraightLine) {
                     logicRef.current.snapToStraightLine();
                 }
             }, 500);
@@ -375,10 +394,9 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     };
 
     const handlePointerUp = () => {
-        if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-        isDrawingRef.current = false;
-        holdStateRef.current = null;
-    };
+        // This is now only called by the local pointer events on the div, not used.
+        // All cleanup happens in the global window listener above.
+            };
 
 
     return (
@@ -467,8 +485,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
                 onPointerMoveCapture={handlePointerMove}
                 onPointerUpCapture={handlePointerUp}
                 onPointerCancelCapture={handlePointerUp}
-                onPointerOutCapture={handlePointerUp}
-                onPointerLeaveCapture={handlePointerUp}
             >
                 <SignatureCanvas
                     ref={canvasRef}
@@ -500,3 +516,5 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         </div>
     );
 }
+
+
