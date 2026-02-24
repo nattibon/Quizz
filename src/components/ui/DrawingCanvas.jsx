@@ -369,6 +369,12 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
             try { e.target.setPointerCapture(e.pointerId); } catch (err) { }
             const pad = canvasRef.current?.getSignaturePad();
             if (pad) {
+                // Ensure internal pad state perfectly matches our calculated React state before stroke begins
+                pad.penColor = penColor;
+                pad.minWidth = minWidth;
+                pad.maxWidth = maxWidth;
+                pad.velocityFilterWeight = velocityFilterWeight;
+
                 pad._strokeBegin({ clientX: e.clientX, clientY: e.clientY });
             }
             isDrawingRef.current = true;
