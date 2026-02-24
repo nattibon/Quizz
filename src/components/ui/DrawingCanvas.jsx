@@ -134,7 +134,6 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         if (bgImageRef.current) {
             const ctx = pad._ctx;
             const canvas = pad._canvas;
-            // Get ratio from window
             const ratio = Math.max(window.devicePixelRatio || 1, 1);
             const width = canvas.width / ratio;
             const height = canvas.height / ratio;
@@ -145,34 +144,40 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         const strokes = cachedStrokesRef.current;
         if (strokes.length === 0) return;
 
+        const ctx = pad._ctx;
         const oldColor = pad.penColor;
         const oldMin = pad.minWidth;
         const oldMax = pad.maxWidth;
         const oldVelocity = pad.velocityFilterWeight;
 
-        const originalData = [];
-
+        // Draw each stroke independently using the pad's internal render pipeline
+        // but resetting pad state between strokes to prevent point leakage
         strokes.forEach(stroke => {
             pad.penColor = stroke.penColor;
             pad.minWidth = stroke.minWidth;
             pad.maxWidth = stroke.maxWidth;
             pad.velocityFilterWeight = stroke.velocityFilterWeight;
+            ctx.fillStyle = stroke.penColor;
 
+            // Feed ONLY this stroke's points as a single group – _fromData resets 
+            // internal bezier state at j===0, so one-group-per-call is clean.
             pad._fromData(
                 [stroke.points],
                 (curve, widths) => pad._drawCurve(curve, widths.start, widths.end),
                 (rawPoint) => pad._drawDot(rawPoint)
             );
-            originalData.push(stroke.points);
         });
 
-        pad._data = originalData;
+        // Restore _data so signature_pad knows what's on canvas
+        pad._data = strokes.map(s => s.points);
+        pad._isEmpty = false;
 
-        // Restore active tools
+        // Restore active tool settings
         pad.penColor = oldColor;
         pad.minWidth = oldMin;
         pad.maxWidth = oldMax;
         pad.velocityFilterWeight = oldVelocity;
+        ctx.fillStyle = oldColor;
     };
 
     // Initial Resize and Window Resize listener
