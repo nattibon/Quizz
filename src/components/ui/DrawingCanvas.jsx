@@ -207,10 +207,20 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
     }, [onSave]);
 
     // ── Pointer events ────────────────────────────────────
-    // Cache the canvas rect once on pointer-down to avoid per-frame reflows in move handler
+    // On mobile, PointerEvent.clientX/Y are in VISUAL viewport coordinates (post-zoom),
+    // but getBoundingClientRect() is in LAYOUT viewport coordinates (pre-zoom CSS pixels).
+    // After pinch-to-zoom we MUST divide by visualViewport.scale to sync them up.
+    const toCanvasCoords = (clientX, clientY, rect) => {
+        const scale = window.visualViewport?.scale ?? 1;
+        return {
+            x: clientX / scale - rect.left,
+            y: clientY / scale - rect.top,
+        };
+    };
+
     const getCanvasPoint = (e) => {
         const r = canvasRectRef.current ?? canvasRef.current.getBoundingClientRect();
-        return { x: e.clientX - r.left, y: e.clientY - r.top };
+        return toCanvasCoords(e.clientX, e.clientY, r);
     };
 
     const handlePointerDown = (e) => {
@@ -251,7 +261,7 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         // Exponential Moving Average smoothing (alpha=0.35: lower = smoother, higher = more responsive)
         const ALPHA = 0.35;
         for (const re of rawEvents) {
-            const raw = { x: re.clientX - r.left, y: re.clientY - r.top };
+            const raw = toCanvasCoords(re.clientX, re.clientY, r);
             // Lerp toward the raw point – kills jitter while keeping the curve feeling natural
             if (!smoothedPtRef.current) {
                 smoothedPtRef.current = raw;
