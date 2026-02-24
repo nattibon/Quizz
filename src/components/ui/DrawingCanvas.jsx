@@ -206,6 +206,27 @@ export default function DrawingCanvas({ initialDataUrl, onSave, overlayMode = fa
         onSave(empty ? '' : canvas.toDataURL('image/png'));
     }, [onSave]);
 
+    // ── Global Touch Prevention ───────────────────────────
+    // Even with touchAction: 'none', Android Chrome sometimes hijacks long stylus strokes
+    // for scrolling if the stylus contact area is large or registers as a touch.
+    // This forcibly prevents all scrolling globally while the stylus is actively drawing.
+    useEffect(() => {
+        const preventTouchScroll = (e) => {
+            if (isDrawingRef.current) {
+                e.preventDefault();
+            }
+        };
+
+        // Must be non-passive to allow preventDefault()
+        window.addEventListener('touchmove', preventTouchScroll, { passive: false });
+        window.addEventListener('touchstart', preventTouchScroll, { passive: false });
+
+        return () => {
+            window.removeEventListener('touchmove', preventTouchScroll);
+            window.removeEventListener('touchstart', preventTouchScroll);
+        };
+    }, []);
+
     // ── Pointer events ────────────────────────────────────
     // On mobile, PointerEvent.clientX/Y are in VISUAL viewport coordinates (post-zoom),
     // but getBoundingClientRect() is in LAYOUT viewport coordinates (pre-zoom CSS pixels).
