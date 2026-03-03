@@ -132,6 +132,8 @@ export default function ExamMode({ quizId, navigateTo }) {
     const currentQuestion = examQuestions[currentQuestionIndex];
     const isLastQuestion = currentQuestionIndex === examQuestions.length - 1;
     const isFirstQuestion = currentQuestionIndex === 0;
+    const examMcqCount = examQuestions.filter(q => q.type === 'mcq').length;
+    const examEssayCount = examQuestions.filter(q => q.type === 'essay').length;
 
     const handleAnswerSelect = (originalIndex) => {
         setAnswers({ ...answers, [currentQuestion.id]: originalIndex });
@@ -245,6 +247,8 @@ export default function ExamMode({ quizId, navigateTo }) {
     if (!isExamStarted) {
         const limit = parseInt(quiz.numQuestionsToShow) || 0;
         const displayCount = limit > 0 && limit < quiz.questions.length ? limit : quiz.questions.length;
+        const mcqTotal = quiz.questions.filter(q => q.type === 'mcq').length;
+        const essayTotal = quiz.questions.filter(q => q.type === 'essay').length;
         return (
             <div className="max-w-md mx-auto mt-12 bg-white p-8 rounded-2xl shadow-md border border-slate-100 text-center">
                 <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -253,6 +257,10 @@ export default function ExamMode({ quizId, navigateTo }) {
                 <h2 className="text-2xl font-bold text-slate-800 mb-2">{quiz.title}</h2>
                 <div className="text-slate-500 mb-8 space-y-2">
                     <p>จำนวนข้อสอบ {displayCount} ข้อ{limit > 0 && limit < quiz.questions.length ? ` (สุ่มจาก ${quiz.questions.length} ข้อ)` : ''}</p>
+                    <div className="flex justify-center gap-2 flex-wrap">
+                        {mcqTotal > 0 && <span className="px-3 py-0.5 bg-primary-50 text-primary-700 rounded-full border border-primary-200 text-sm font-semibold">ปรนัย {mcqTotal} ข้อ</span>}
+                        {essayTotal > 0 && <span className="px-3 py-0.5 bg-indigo-50 text-indigo-700 rounded-full border border-indigo-200 text-sm font-semibold">อัตนัย {essayTotal} ข้อ</span>}
+                    </div>
                     {quiz.timeLimitMinutes > 0 && (
                         <p className="flex items-center justify-center gap-2 text-amber-600 font-medium">
                             <Clock className="w-4 h-4" /> จำกัดเวลา {quiz.timeLimitMinutes} นาที
@@ -312,7 +320,10 @@ export default function ExamMode({ quizId, navigateTo }) {
                     <div className="flex justify-between items-start gap-4">
                         <div className="flex-1">
                             <div className="text-xl font-semibold text-slate-900 leading-relaxed">
-                                <span className="text-primary-600 mr-2">{currentQuestionIndex + 1}.</span>
+                                <span className="text-primary-600 mr-1">{currentQuestionIndex + 1}.</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full mr-2 align-middle ${currentQuestion.type === 'essay' ? 'bg-indigo-100 text-indigo-700' : 'bg-primary-100 text-primary-700'}`}>
+                                    {currentQuestion.type === 'essay' ? 'อัตนัย' : 'ปรนัย'}
+                                </span>
                                 {currentQuestion.text}
                             </div>
                             {/* Question Image */}
@@ -423,19 +434,30 @@ export default function ExamMode({ quizId, navigateTo }) {
             <p className="text-center text-xs text-slate-400 pt-4">
                 กด <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-slate-500 font-mono">←</kbd> <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-slate-500 font-mono">→</kbd> เปลี่ยนข้อ &nbsp;|&nbsp; กด <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-slate-500 font-mono">1</kbd>–<kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-300 rounded text-slate-500 font-mono">4</kbd> เลือกตอบปรนัย
             </p>
+            {examMcqCount > 0 && examEssayCount > 0 && (
+                <div className="flex justify-center gap-4 text-xs text-slate-500 pt-1">
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-primary-200 border border-primary-300 inline-block" />ปรนัย</span>
+                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-indigo-200 border border-indigo-300 inline-block" />อัตนัย</span>
+                </div>
+            )}
             <div className="flex justify-center flex-wrap gap-2.5 pt-3 pb-12">
                 {examQuestions.map((q, idx) => {
                     const isAnswered = q.type === 'mcq'
                         ? answers[q.id] !== undefined
                         : (answers[q.id]?.text?.trim() || answers[q.id]?.drawingUrl);
+                    const isMcq = q.type === 'mcq';
                     return (
                         <button
                             key={q.id}
                             onClick={() => setCurrentQuestionIndex(idx)}
                             className={`w-10 h-10 md:w-11 md:h-11 rounded-full text-sm font-bold flex items-center justify-center transition-all border-2 ${currentQuestionIndex === idx
-                                ? 'border-primary-600 bg-white text-primary-600 shadow-md scale-110'
+                                ? isMcq
+                                    ? 'border-primary-600 bg-white text-primary-600 shadow-md scale-110'
+                                    : 'border-indigo-600 bg-white text-indigo-600 shadow-md scale-110'
                                 : isAnswered
-                                    ? 'bg-primary-100 border-primary-200 text-primary-800'
+                                    ? isMcq
+                                        ? 'bg-primary-100 border-primary-200 text-primary-800'
+                                        : 'bg-indigo-100 border-indigo-200 text-indigo-800'
                                     : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                         >

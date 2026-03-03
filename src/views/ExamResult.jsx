@@ -50,21 +50,34 @@ export default function ExamResult({ result, navigateTo }) {
                     <p className="text-base text-slate-500">ผู้สอบ: <span className="font-semibold text-slate-700">{studentName}</span></p>
                 )}
 
-                {mcqScore.total > 0 && (
-                    <div className={`mt-8 inline-block px-10 py-8 rounded-3xl border-2 ${scoreBg} ${borderCol} shadow-sm`}>
-                        <div className="text-sm font-bold uppercase tracking-wider text-slate-600 mb-3">คะแนนปรนัยของคุณ</div>
-                        <div className="flex items-baseline justify-center gap-2">
-                            <span className={`text-6xl font-black ${scoreColor} drop-shadow-sm`}>
-                                {mcqScore.percentage}%
-                            </span>
-                        </div>
-                        <div className="mt-4 flex items-center justify-center gap-4 text-lg font-medium">
-                            <span className="text-slate-600 flex items-center">
-                                <CheckCircle2 className="w-5 h-5 text-emerald-500 mr-2" /> ตอบถูก {mcqScore.correct}
-                            </span>
-                            <span className="text-slate-300">|</span>
-                            <span className="text-slate-600">เต็ม {mcqScore.total} ข้อ</span>
-                        </div>
+                {(mcqScore.total > 0 || subjectiveAnswers.length > 0) && (
+                    <div className="mt-8 flex flex-wrap justify-center gap-4">
+                        {mcqScore.total > 0 && (
+                            <div className={`px-10 py-8 rounded-3xl border-2 ${scoreBg} ${borderCol} shadow-sm`}>
+                                <div className="text-sm font-bold uppercase tracking-wider text-slate-600 mb-3">คะแนนปรนัย</div>
+                                <div className="flex items-baseline justify-center gap-2">
+                                    <span className={`text-6xl font-black ${scoreColor} drop-shadow-sm`}>
+                                        {mcqScore.percentage}%
+                                    </span>
+                                </div>
+                                <div className="mt-4 flex items-center justify-center gap-4 text-lg font-medium">
+                                    <span className="text-slate-600 flex items-center">
+                                        <CheckCircle2 className="w-5 h-5 text-emerald-500 mr-2" /> ถูก {mcqScore.correct}
+                                    </span>
+                                    <span className="text-slate-300">|</span>
+                                    <span className="text-slate-600">เต็ม {mcqScore.total} ข้อ</span>
+                                </div>
+                            </div>
+                        )}
+                        {subjectiveAnswers.length > 0 && (
+                            <div className="px-10 py-8 rounded-3xl border-2 border-indigo-200 bg-indigo-50 shadow-sm flex flex-col items-center justify-center">
+                                <div className="text-sm font-bold uppercase tracking-wider text-indigo-600 mb-3">อัตนัย</div>
+                                <div className="text-6xl font-black text-indigo-700 drop-shadow-sm">
+                                    {subjectiveAnswers.length}
+                                </div>
+                                <div className="mt-4 text-lg font-medium text-indigo-600">ข้อ — รอครูตรวจ</div>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
