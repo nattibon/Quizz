@@ -134,6 +134,10 @@ export default function ExamMode({ quizId, navigateTo }) {
     const isFirstQuestion = currentQuestionIndex === 0;
     const examMcqCount = examQuestions.filter(q => q.type === 'mcq').length;
     const examEssayCount = examQuestions.filter(q => q.type === 'essay').length;
+    // Per-type sequential index (1-based) for each question
+    const questionTypeIndices = examQuestions.map((q, idx) =>
+        examQuestions.slice(0, idx).filter(prev => prev.type === q.type).length + 1
+    );
 
     const handleAnswerSelect = (originalIndex) => {
         setAnswers({ ...answers, [currentQuestion.id]: originalIndex });
@@ -223,12 +227,12 @@ export default function ExamMode({ quizId, navigateTo }) {
 
     const handleSubmit = () => {
         const unanswered = examQuestions
-            .map((q, idx) => ({ q, num: idx + 1 }))
+            .map((q, idx) => ({ q, label: `${q.type === 'mcq' ? 'ปรนัย' : 'อัตนัย'} ${questionTypeIndices[idx]}` }))
             .filter(({ q }) => {
                 if (q.type === 'mcq') return answers[q.id] === undefined;
                 return !answers[q.id]?.text?.trim() && !answers[q.id]?.drawingUrl;
             })
-            .map(({ num }) => num);
+            .map(({ label }) => label);
 
         setUnansweredNums(unanswered);
         setShowSubmitModal(true);
@@ -290,7 +294,13 @@ export default function ExamMode({ quizId, navigateTo }) {
             <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-200">
                 <div>
                     <h2 className="text-xl font-bold text-slate-800">{quiz.title}</h2>
-                    <p className="text-sm font-medium text-slate-500 mt-1">ข้อที่ {currentQuestionIndex + 1} จากทั้งหมด {examQuestions.length}</p>
+                    <p className="text-sm font-medium text-slate-500 mt-1">
+                        <span className={currentQuestion.type === 'essay' ? 'text-indigo-600' : 'text-primary-600'}>
+                            {currentQuestion.type === 'essay' ? 'อัตนัย' : 'ปรนัย'} ข้อ {questionTypeIndices[currentQuestionIndex]}
+                        </span>
+                        {' / '}{currentQuestion.type === 'essay' ? examEssayCount : examMcqCount}
+                        <span className="text-slate-400"> (รวม {examQuestions.length} ข้อ)</span>
+                    </p>
                 </div>
                 <div className="flex flex-col items-end gap-3">
                     {timeLeft !== null && (
@@ -320,7 +330,7 @@ export default function ExamMode({ quizId, navigateTo }) {
                     <div className="flex justify-between items-start gap-4">
                         <div className="flex-1">
                             <div className="text-xl font-semibold text-slate-900 leading-relaxed">
-                                <span className="text-primary-600 mr-1">{currentQuestionIndex + 1}.</span>
+                                <span className={`mr-1 ${currentQuestion.type === 'essay' ? 'text-indigo-600' : 'text-primary-600'}`}>{questionTypeIndices[currentQuestionIndex]}.</span>
                                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full mr-2 align-middle ${currentQuestion.type === 'essay' ? 'bg-indigo-100 text-indigo-700' : 'bg-primary-100 text-primary-700'}`}>
                                     {currentQuestion.type === 'essay' ? 'อัตนัย' : 'ปรนัย'}
                                 </span>
@@ -461,7 +471,7 @@ export default function ExamMode({ quizId, navigateTo }) {
                                     : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
                                 }`}
                         >
-                            {idx + 1}
+                            {questionTypeIndices[idx]}
                         </button>
                     );
                 })}
@@ -487,9 +497,9 @@ export default function ExamMode({ quizId, navigateTo }) {
                                     ยังมี <span className="font-bold text-red-600">{unansweredNums.length} ข้อ</span> ที่ยังไม่ได้ตอบ
                                 </p>
                                 <div className="flex flex-wrap justify-center gap-2 mb-3">
-                                    {unansweredNums.map(num => (
-                                        <span key={num} className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-sm font-bold">
-                                            ข้อ {num}
+                                    {unansweredNums.map(label => (
+                                        <span key={label} className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-sm font-bold">
+                                            {label}
                                         </span>
                                     ))}
                                 </div>
