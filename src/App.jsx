@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { QuizProvider, useQuiz } from './context/QuizContext';
+import { ToastProvider } from './context/ToastContext';
 import { BookOpen } from 'lucide-react';
 import Dashboard from './views/Dashboard';
 import QuizEditor from './views/QuizEditor';
@@ -72,9 +73,11 @@ function AppContent() {
 
 function App() {
   return (
-    <QuizProvider>
-      <AppContent />
-    </QuizProvider>
+    <ToastProvider>
+      <QuizProvider>
+        <AppContent />
+      </QuizProvider>
+    </ToastProvider>
   );
 }
 

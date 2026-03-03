@@ -1,13 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Button } from './Button';
-import { X, Trophy, Clock, CheckCircle2, History } from 'lucide-react';
+import { X, Trophy, Clock, CheckCircle2, History, Download, TrendingUp, Users, Award } from 'lucide-react';
 import { useQuiz } from '../../context/QuizContext';
 
 export default function HistoryViewModal({ quizId, isOpen, onClose }) {
     const { history, quizzes } = useQuiz();
     const quiz = quizzes.find(q => q.id === quizId);
 
-    // Filter history records for this specific quiz, sorted by newest first
     const quizHistory = history.filter(h => h.quizId === quizId).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     if (!isOpen || !quiz) return null;
@@ -18,6 +17,37 @@ export default function HistoryViewModal({ quizId, isOpen, onClose }) {
             year: 'numeric', month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit'
         }).format(date);
+    };
+
+    // Statistics
+    const totalAttempts = quizHistory.length;
+    const avgPct = totalAttempts > 0
+        ? Math.round(quizHistory.reduce((s, r) => s + r.percentage, 0) / totalAttempts)
+        : 0;
+    const passCount = quizHistory.filter(r => r.percentage >= 80).length;
+    const passRate = totalAttempts > 0 ? Math.round((passCount / totalAttempts) * 100) : 0;
+    const bestPct = totalAttempts > 0 ? Math.max(...quizHistory.map(r => r.percentage)) : 0;
+
+    const handleExportCSV = () => {
+        const BOM = '\uFEFF';
+        const headers = ['ชื่อ-สกุล', 'วันที่-เวลา', 'คะแนน', 'เต็ม', 'เปอร์เซ็นต์'];
+        const rows = quizHistory.map(r => [
+            `"${r.studentName || 'ไม่ระบุชื่อ'}"`,
+            `"${formatDate(r.timestamp)}"`,
+            r.score,
+            r.total,
+            `${r.percentage}%`
+        ]);
+        const csvContent = BOM + [headers, ...rows].map(r => r.join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${quiz.title}-history.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     };
 
     return (
@@ -33,14 +63,52 @@ export default function HistoryViewModal({ quizId, isOpen, onClose }) {
                         </h3>
                         <p className="text-sm font-medium text-slate-500 mt-1">{quiz.title}</p>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="text-slate-400 hover:text-red-500 hover:bg-slate-200 p-1.5 rounded-full transition-colors"
-                        title="ปิด"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {totalAttempts > 0 && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                onClick={handleExportCSV}
+                            >
+                                <Download className="w-4 h-4 mr-1.5" /> Export CSV
+                            </Button>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="text-slate-400 hover:text-red-500 hover:bg-slate-200 p-1.5 rounded-full transition-colors"
+                            title="ปิด"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
+
+                {/* Stats Summary */}
+                {totalAttempts > 0 && (
+                    <div className="grid grid-cols-4 gap-0 border-b border-slate-100 divide-x divide-slate-100">
+                        <div className="flex flex-col items-center justify-center p-4 bg-white">
+                            <Users className="w-5 h-5 text-indigo-400 mb-1" />
+                            <div className="text-2xl font-black text-indigo-600">{totalAttempts}</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-0.5">ครั้งทั้งหมด</div>
+                        </div>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white">
+                            <TrendingUp className="w-5 h-5 text-blue-400 mb-1" />
+                            <div className="text-2xl font-black text-blue-600">{avgPct}%</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-0.5">คะแนนเฉลี่ย</div>
+                        </div>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-400 mb-1" />
+                            <div className="text-2xl font-black text-emerald-600">{passRate}%</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-0.5">ผ่านเกณฑ์ (≥80%)</div>
+                        </div>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white">
+                            <Award className="w-5 h-5 text-amber-400 mb-1" />
+                            <div className="text-2xl font-black text-amber-600">{bestPct}%</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-0.5">คะแนนสูงสุด</div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Content Body */}
                 <div className="flex-1 overflow-y-auto p-6 bg-slate-100">

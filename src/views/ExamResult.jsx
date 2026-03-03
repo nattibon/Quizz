@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
-import { Trophy, ArrowLeft, CheckCircle2, XCircle, AlertCircle, Check, X, FileText, Lightbulb, Link2 } from 'lucide-react';
+import { Trophy, ArrowLeft, CheckCircle2, XCircle, FileText, Lightbulb, Link2, Check, X, RefreshCw, Printer } from 'lucide-react';
 import { useQuiz } from '../context/QuizContext';
 import MaterialViewerModal from '../components/ui/MaterialViewerModal';
 
@@ -20,9 +20,8 @@ export default function ExamResult({ result, navigateTo }) {
         );
     }
 
-    const { quizTitle, mcqScore, mcqDetails, subjectiveAnswers } = result;
+    const { quizTitle, studentName, mcqScore, mcqDetails, subjectiveAnswers } = result;
 
-    // Decide a performance color based on percentage
     let scoreColor = 'text-primary-600';
     let scoreBg = 'bg-primary-50';
     let borderCol = 'border-primary-200';
@@ -36,15 +35,20 @@ export default function ExamResult({ result, navigateTo }) {
         borderCol = 'border-red-200';
     }
 
+    const handlePrint = () => window.print();
+
     return (
         <div className="max-w-4xl mx-auto space-y-10 pb-16">
-            {/* Header / Score Summary */}
+            {/* Score Summary */}
             <div className="text-center space-y-5 bg-white p-10 rounded-2xl shadow-sm border border-slate-100">
                 <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-amber-100 text-amber-500 mb-2 shadow-inner border-[6px] border-amber-50">
                     <Trophy className="w-12 h-12" />
                 </div>
                 <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight">ทำข้อสอบเสร็จสิ้น!</h2>
                 <p className="text-xl text-slate-600 font-medium">{quizTitle}</p>
+                {studentName && studentName !== 'ไม่ระบุชื่อ' && (
+                    <p className="text-base text-slate-500">ผู้สอบ: <span className="font-semibold text-slate-700">{studentName}</span></p>
+                )}
 
                 {mcqScore.total > 0 && (
                     <div className={`mt-8 inline-block px-10 py-8 rounded-3xl border-2 ${scoreBg} ${borderCol} shadow-sm`}>
@@ -55,7 +59,9 @@ export default function ExamResult({ result, navigateTo }) {
                             </span>
                         </div>
                         <div className="mt-4 flex items-center justify-center gap-4 text-lg font-medium">
-                            <span className="text-slate-600 flex items-center"><CheckCircle2 className="w-5 h-5 text-emerald-500 mr-2" /> ตอบถูก {mcqScore.correct}</span>
+                            <span className="text-slate-600 flex items-center">
+                                <CheckCircle2 className="w-5 h-5 text-emerald-500 mr-2" /> ตอบถูก {mcqScore.correct}
+                            </span>
                             <span className="text-slate-300">|</span>
                             <span className="text-slate-600">เต็ม {mcqScore.total} ข้อ</span>
                         </div>
@@ -63,14 +69,13 @@ export default function ExamResult({ result, navigateTo }) {
                 )}
             </div>
 
-            {/* Review MCQ Sections (NEW Feature for tutoring) */}
+            {/* MCQ Review */}
             {mcqDetails && mcqDetails.length > 0 && (
                 <div className="space-y-6 pt-4">
                     <div className="flex items-center gap-3 mb-6 p-4 bg-slate-100 rounded-xl">
                         <CheckCircle2 className="w-6 h-6 text-primary-600" />
                         <h3 className="text-2xl font-bold text-slate-900">ทบทวนข้อสอบปรนัย</h3>
                     </div>
-
                     <div className="space-y-6">
                         {mcqDetails.map((item, idx) => (
                             <Card key={item.questionId} className={`border-2 ${item.isCorrect ? 'border-emerald-200' : 'border-red-200'} overflow-hidden shadow-sm`}>
@@ -78,16 +83,24 @@ export default function ExamResult({ result, navigateTo }) {
                                     <div className={`mt-0.5 shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-white ${item.isCorrect ? 'bg-emerald-500' : 'bg-red-500'}`}>
                                         {item.isCorrect ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
                                     </div>
-                                    <div>
-                                        <h4 className={`font-bold text-lg ${item.isCorrect ? 'text-emerald-900' : 'text-red-900'}`}>{idx + 1}. {item.questionText}</h4>
-                                    </div>
+                                    <h4 className={`font-bold text-lg ${item.isCorrect ? 'text-emerald-900' : 'text-red-900'}`}>
+                                        {idx + 1}. {item.questionText}
+                                    </h4>
                                 </div>
                                 <CardContent className="p-6 bg-white space-y-4">
+                                    {/* Question Image */}
+                                    {item.imageUrl && (
+                                        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                                            <img src={item.imageUrl} alt="รูปประกอบคำถาม" className="w-full max-h-56 object-contain" />
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                                             <p className="text-sm font-semibold text-slate-500 mb-2">คำตอบของคุณ:</p>
-                                            <p className={`text-base font-medium flex items-center ${item.isCorrect ? 'text-emerald-700' : 'text-red-600'}`}>
-                                                {item.userAnswerIndex !== undefined ? item.options[item.userAnswerIndex] : <span className="italic text-slate-400">ข้าม / ไม่ได้ตอบ</span>}
+                                            <p className={`text-base font-medium ${item.isCorrect ? 'text-emerald-700' : 'text-red-600'}`}>
+                                                {item.userAnswerIndex !== undefined
+                                                    ? item.options[item.userAnswerIndex]
+                                                    : <span className="italic text-slate-400">ข้าม / ไม่ได้ตอบ</span>}
                                             </p>
                                         </div>
                                         {!item.isCorrect && (
@@ -99,21 +112,16 @@ export default function ExamResult({ result, navigateTo }) {
                                             </div>
                                         )}
                                     </div>
-
-                                    {/* Explanation Block */}
                                     {item.explanation && (
-                                        <div className="mt-4 bg-amber-50 p-5 rounded-xl border border-amber-200">
+                                        <div className="bg-amber-50 p-5 rounded-xl border border-amber-200">
                                             <div className="flex items-center gap-2 mb-2 text-amber-800 font-bold">
-                                                <Lightbulb className="w-5 h-5 text-amber-500" />
-                                                คำอธิบายเฉลย
+                                                <Lightbulb className="w-5 h-5 text-amber-500" /> คำอธิบายเฉลย
                                             </div>
                                             <p className="text-amber-900 leading-relaxed">{item.explanation}</p>
                                         </div>
                                     )}
-
-                                    {/* View Linked Material Button */}
                                     {item.linkedMaterialId && (
-                                        <div className="mt-4 flex justify-end">
+                                        <div className="flex justify-end">
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -134,17 +142,16 @@ export default function ExamResult({ result, navigateTo }) {
                 </div>
             )}
 
-            {/* Subjective Answers Review */}
+            {/* Subjective Review */}
             {subjectiveAnswers.length > 0 && (
                 <div className="space-y-6 pt-8 border-t-2 border-slate-200">
                     <div className="flex items-center gap-3 mb-6 p-4 bg-indigo-50 rounded-xl">
                         <FileText className="w-6 h-6 text-indigo-600" />
                         <div>
                             <h3 className="text-2xl font-bold text-indigo-900">ทบทวนข้อสอบอัตนัย</h3>
-                            <p className="text-indigo-700 mt-1 font-medium">เปรียบเทียบคำตอบของคุณกับแนวทางการตอบ เพื่อประเมินตนเอง</p>
+                            <p className="text-indigo-700 mt-1 font-medium">เปรียบเทียบคำตอบของคุณกับแนวทางการตอบ</p>
                         </div>
                     </div>
-
                     <div className="space-y-6">
                         {subjectiveAnswers.map((item, idx) => (
                             <Card key={item.questionId} className="border-indigo-200 overflow-hidden shadow-sm">
@@ -153,15 +160,21 @@ export default function ExamResult({ result, navigateTo }) {
                                     <p className="text-white text-lg font-medium">{item.questionText}</p>
                                 </div>
                                 <CardContent className="p-0">
+                                    {/* Question Image */}
+                                    {item.imageUrl && (
+                                        <div className="px-6 pt-4">
+                                            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                                                <img src={item.imageUrl} alt="รูปประกอบคำถาม" className="w-full max-h-56 object-contain" />
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x-2 divide-slate-100">
                                         <div className="p-6 bg-slate-50">
-                                            <div className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                คำตอบของคุณ
-                                            </div>
+                                            <div className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">คำตอบของคุณ</div>
                                             <div className="text-slate-800 whitespace-pre-wrap leading-relaxed">
                                                 {item.userDrawingUrl ? (
                                                     <div className="bg-white border-2 border-slate-200 rounded-lg p-2 flex justify-center w-full">
-                                                        <img src={item.userDrawingUrl} alt="คำตอบที่วาดด้วยปากกา" className="max-w-full max-h-[300px] object-contain rounded-md" />
+                                                        <img src={item.userDrawingUrl} alt="คำตอบที่วาด" className="max-w-full max-h-[300px] object-contain rounded-md" />
                                                     </div>
                                                 ) : (
                                                     item.userAnswer || <span className="text-slate-400 italic">ไม่ได้ตอบคำถามนี้</span>
@@ -177,20 +190,16 @@ export default function ExamResult({ result, navigateTo }) {
                                             </div>
                                         </div>
                                     </div>
-                                    {/* Explanation Block */}
                                     {item.explanation && (
                                         <div className="m-6 mt-0 bg-amber-50 p-5 rounded-xl border border-amber-200">
                                             <div className="flex items-center gap-2 mb-2 text-amber-800 font-bold">
-                                                <Lightbulb className="w-5 h-5 text-amber-500" />
-                                                คำอธิบายเพิ่มเติม
+                                                <Lightbulb className="w-5 h-5 text-amber-500" /> คำอธิบายเพิ่มเติม
                                             </div>
                                             <p className="text-amber-900 leading-relaxed">{item.explanation}</p>
                                         </div>
                                     )}
-
-                                    {/* View Linked Material Button */}
                                     {item.linkedMaterialId && (
-                                        <div className="m-6 mt-4 flex justify-end">
+                                        <div className="m-6 mt-0 flex justify-end">
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -212,14 +221,30 @@ export default function ExamResult({ result, navigateTo }) {
             )}
 
             {/* Action Buttons */}
-            <div className="flex justify-center gap-4 pt-10 pb-6 border-t border-slate-200">
+            <div className="flex flex-wrap justify-center gap-4 pt-10 pb-6 border-t border-slate-200">
+                <Button
+                    variant="outline"
+                    size="lg"
+                    className="px-6"
+                    onClick={handlePrint}
+                >
+                    <Printer className="w-5 h-5 mr-2" /> พิมพ์ผลลัพธ์
+                </Button>
+                <Button
+                    variant="outline"
+                    size="lg"
+                    className="px-6 border-indigo-300 text-indigo-700 hover:bg-indigo-50"
+                    onClick={() => navigateTo('exam', { quizId: result.quizId })}
+                >
+                    <RefreshCw className="w-5 h-5 mr-2" /> ทำข้อสอบใหม่
+                </Button>
                 <Button
                     variant="primary"
                     size="lg"
                     className="px-8 shadow-md"
                     onClick={() => navigateTo('dashboard')}
                 >
-                    <ArrowLeft className="w-5 h-5 mr-2" /> กลับไปหน้าแบบทดสอบ
+                    <ArrowLeft className="w-5 h-5 mr-2" /> กลับหน้าแบบทดสอบ
                 </Button>
             </div>
 

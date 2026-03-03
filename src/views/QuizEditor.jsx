@@ -25,6 +25,8 @@ export default function QuizEditor({ quizId, navigateTo }) {
     const [shuffleQuestions, setShuffleQuestions] = useState(quiz.shuffleQuestions || false);
     const [shuffleOptions, setShuffleOptions] = useState(quiz.shuffleOptions || false);
     const [timeLimitMinutes, setTimeLimitMinutes] = useState(quiz.timeLimitMinutes || 0);
+    const [numQuestionsToShow, setNumQuestionsToShow] = useState(quiz.numQuestionsToShow || 0);
+    const [tagsInput, setTagsInput] = useState((quiz.tags || []).join(', '));
     const [activeTab, setActiveTab] = useState('questions'); // 'questions' or 'materials'
 
     const handleSaveQuizDetails = () => {
@@ -34,6 +36,11 @@ export default function QuizEditor({ quizId, navigateTo }) {
             shuffleQuestions,
             shuffleOptions
         });
+    };
+
+    const handleSaveTags = () => {
+        const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
+        updateQuiz(quiz.id, { tags });
     };
 
     const handleAddMCQ = () => {
@@ -102,25 +109,63 @@ export default function QuizEditor({ quizId, navigateTo }) {
                             />
                         </div>
 
-                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                            <h3 className="text-sm font-semibold text-indigo-900 mb-3">ตั้งเวลาทำข้อสอบ (นาที)</h3>
-                            <div className="flex items-center gap-3">
-                                <Input
-                                    type="number"
-                                    min="0"
-                                    placeholder="เช่น 60"
-                                    value={timeLimitMinutes || ''}
-                                    onChange={(e) => {
-                                        const val = parseInt(e.target.value) || 0;
-                                        setTimeLimitMinutes(val);
-                                        updateQuiz(quiz.id, { timeLimitMinutes: val });
-                                    }}
-                                    className="w-32 bg-white"
-                                />
-                                <span className="text-indigo-700 text-sm font-medium">
-                                    {timeLimitMinutes > 0 ? `จำกัดเวลาทำข้อสอบ ${timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา (ใส่ 0)'}
-                                </span>
+                        <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 space-y-4">
+                            <div>
+                                <h3 className="text-sm font-semibold text-indigo-900 mb-3">ตั้งเวลาทำข้อสอบ (นาที)</h3>
+                                <div className="flex items-center gap-3">
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        placeholder="เช่น 60"
+                                        value={timeLimitMinutes || ''}
+                                        onChange={(e) => {
+                                            const val = parseInt(e.target.value) || 0;
+                                            setTimeLimitMinutes(val);
+                                            updateQuiz(quiz.id, { timeLimitMinutes: val });
+                                        }}
+                                        className="w-32 bg-white"
+                                    />
+                                    <span className="text-indigo-700 text-sm font-medium">
+                                        {timeLimitMinutes > 0 ? `จำกัดเวลา ${timeLimitMinutes} นาที` : 'ไม่จำกัดเวลา (ใส่ 0)'}
+                                    </span>
+                                </div>
                             </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-indigo-900 mb-3">จำนวนข้อที่ออกสอบ (สุ่มจากทั้งหมด)</h3>
+                                <div className="flex items-center gap-3">
+                                    <Input
+                                        type="number"
+                                        min="0"
+                                        max={quiz.questions.length}
+                                        placeholder="เช่น 20"
+                                        value={numQuestionsToShow || ''}
+                                        onChange={(e) => {
+                                            const val = parseInt(e.target.value) || 0;
+                                            setNumQuestionsToShow(val);
+                                            updateQuiz(quiz.id, { numQuestionsToShow: val });
+                                        }}
+                                        className="w-32 bg-white"
+                                    />
+                                    <span className="text-indigo-700 text-sm font-medium">
+                                        {numQuestionsToShow > 0
+                                            ? `สุ่มออก ${numQuestionsToShow} ข้อ จาก ${quiz.questions.length} ข้อ`
+                                            : `ออกทุกข้อ (${quiz.questions.length} ข้อ)`}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-indigo-600/80 mt-2">* ต้องเปิด "สลับลำดับคำถาม" เพื่อให้สุ่มข้อได้หลากหลาย</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                            <h3 className="text-sm font-semibold text-slate-700 mb-3">หมวดหมู่ / Tag (คั่นด้วยเครื่องหมายจุลภาค)</h3>
+                            <Input
+                                placeholder="เช่น คณิตศาสตร์, ม.3, เรขาคณิต"
+                                value={tagsInput}
+                                onChange={(e) => setTagsInput(e.target.value)}
+                                onBlur={handleSaveTags}
+                                className="bg-white"
+                            />
+                            <p className="text-xs text-slate-500 mt-2">Tag จะแสดงบนหน้าแรกและสามารถกรองแบบทดสอบตาม Tag ได้</p>
                         </div>
 
                         <div className="space-y-4 bg-slate-50 p-4 rounded-lg border border-slate-100">
